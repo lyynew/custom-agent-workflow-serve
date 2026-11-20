@@ -1,13 +1,15 @@
 # AI 智能服务引擎 · 实现报告
 
-| 项目 | 内容 |
-|---|---|
-| 仓库 | `git@github.com:lyynew/custom-agent-workflow-serve.git` |
-| 当前提交 | `8345eeb`（feat(agent): 新增编排型参考 Agent） |
-| 报告日期 | 2026-11-20 |
-| 覆盖范围 | P0 选型验证 → P5 多副本/配额/模型 → 编排型参考 Agent |
-| 代码规模 | 应用约 4.8k 行（65 个 .py）、测试约 2.6k 行（22 个文件）、迁移 327 行 |
-| 质量状态 | `pytest` 133 passed；`ruff check` 全过；`docker compose config` 校验通过 |
+| 项目   | 内容                                                               |
+| ---- | ---------------------------------------------------------------- |
+| 仓库   | `git@github.com:lyynew/custom-agent-workflow-serve.git`          |
+| 当前提交 | `8345eeb`（feat(agent): 新增编排型参考 Agent）                            |
+| 报告日期 | 2026-11-20                                                       |
+| 覆盖范围 | P0 选型验证 → P5 多副本/配额/模型 → 编排型参考 Agent                             |
+| 代码规模 | 应用约 4.8k 行（65 个 .py）、测试约 2.6k 行（22 个文件）、迁移 327 行                 |
+| 质量状态 | `pytest` 136 passed；`ruff check` 全过；`docker compose config` 校验通过 |
+
+
 
 ---
 
@@ -17,15 +19,15 @@
 
 核心判断是：**认证决定「你是谁」，隔离决定「你能看到什么」，Registry 决定「你能调用什么」**。因此项目 70% 的代码量花在认证、隔离、状态管理这三件事上，而不是花在让示例 Agent 更"聪明"上。
 
-| 指标 | 数量 |
-|---|---|
-| 对外业务接口 | 16 个（全部在 `/api/v1`） |
-| 已注册 Agent | 4 个（assistant / echo / llm / reverse） |
-| 已注册 Workflow | 2 个（sum / text_stats） |
-| 业务数据表 | 5 张 + 1 张版本表（`biz` schema） |
-| 数据库迁移 | 2 个（`0001_initial`、`0002_limits_and_leases`） |
-| 自动化测试 | 133 个 |
-| 交付物 | 镜像、Compose、健康检查、备份脚本、CLI、4 份文档 |
+| 指标           | 数量                                           |
+| ------------ | -------------------------------------------- |
+| 对外业务接口       | 16 个（全部在 `/api/v1`）                          |
+| 已注册 Agent    | 5 个（assistant / simple / echo / llm / reverse）        |
+| 已注册 Workflow | 2 个（sum / text_stats）                        |
+| 业务数据表        | 5 张 + 1 张版本表（`biz` schema）                   |
+| 数据库迁移        | 2 个（`0001_initial`、`0002_limits_and_leases`） |
+| 自动化测试        | 136 个                                        |
+| 交付物          | 镜像、Compose、健康检查、备份脚本、CLI、4 份文档               |
 
 ---
 
@@ -65,13 +67,13 @@ X-App-Id: app_a     X-App-Id: app_b     X-App-Id: app_c
 
 ### 2.2 关键架构决策
 
-| 决策 | 结论 | 依据 |
-|---|---|---|
-| 运行底座 | **Aegra 作宿主**，外面包一层 `RuntimeAdapter` | P0 Spike 5 项验证全过；thread/run 生命周期、SSE 重连、checkpoint 恢复复用比自研划算（ADR 0001） |
-| 业务路由位置 | 挂进 Aegra 的 FastAPI app（`http.app`），不另起服务 | 一套认证实现，避免「认证两次」或「内部接口裸奔」 |
-| 多副本 | **不做跨副本接管**，改「读时对账」 | 接管他人 run 需用户 Token / 万能凭证 / 直读运行时表，三者都突破安全或边界（ADR 0002） |
-| 数据隔离 | 仓储层强制过滤 `(app_id, user_id)`，无裸查询入口 | 靠约定容易漏，靠类型系统与唯一入口才可靠 |
-| Schema 划分 | 业务 `biz`、运行时 `public`，两套 Alembic 互不干扰 | Aegra 独占 `public.alembic_version`，共用会互相覆盖 |
+| 决策        | 结论                                       | 依据                                                                     |
+| --------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| 运行底座      | **Aegra 作宿主**，外面包一层 `RuntimeAdapter`     | P0 Spike 5 项验证全过；thread/run 生命周期、SSE 重连、checkpoint 恢复复用比自研划算（ADR 0001） |
+| 业务路由位置    | 挂进 Aegra 的 FastAPI app（`http.app`），不另起服务 | 一套认证实现，避免「认证两次」或「内部接口裸奔」                                               |
+| 多副本       | **不做跨副本接管**，改「读时对账」                      | 接管他人 run 需用户 Token / 万能凭证 / 直读运行时表，三者都突破安全或边界（ADR 0002）                |
+| 数据隔离      | 仓储层强制过滤 `(app_id, user_id)`，无裸查询入口       | 靠约定容易漏，靠类型系统与唯一入口才可靠                                                   |
+| Schema 划分 | 业务 `biz`、运行时 `public`，两套 Alembic 互不干扰    | Aegra 独占 `public.alembic_version`，共用会互相覆盖                              |
 
 ### 2.3 认证链路（10 步）
 
@@ -101,18 +103,18 @@ X-App-Id: app_a     X-App-Id: app_b     X-App-Id: app_c
 
 **拒绝矩阵（均已验证）**
 
-| 场景 | 结果 |
-|---|---|
-| 缺 `Authorization` | 401 |
-| 缺 `X-App-Id` | 401 |
-| 未知 / 已禁用应用 | 401 |
-| 过期 Token | 401 `token_expired` |
-| 签名错误 | 401 `invalid_token` |
-| `alg=none` | 401 |
-| 用 A 应用 Token 调 B 应用 | 401 `app_mismatch` |
-| 缺 `user_id` claim | 401 `invalid_claim` |
-| 资源不属于当前身份 | 404（不区分「不存在」与「不属于你」） |
-| 应用无权调用该 Agent/Workflow | 403 `forbidden` |
+| 场景                     | 结果                   |
+| ---------------------- | -------------------- |
+| 缺 `Authorization`      | 401                  |
+| 缺 `X-App-Id`           | 401                  |
+| 未知 / 已禁用应用             | 401                  |
+| 过期 Token               | 401 `token_expired`  |
+| 签名错误                   | 401 `invalid_token`  |
+| `alg=none`             | 401                  |
+| 用 A 应用 Token 调 B 应用    | 401 `app_mismatch`   |
+| 缺 `user_id` claim      | 401 `invalid_claim`  |
+| 资源不属于当前身份              | 404（不区分「不存在」与「不属于你」） |
+| 应用无权调用该 Agent/Workflow | 403 `forbidden`      |
 
 ### 3.2 身份上下文与数据隔离
 
@@ -127,23 +129,24 @@ X-App-Id: app_a     X-App-Id: app_b     X-App-Id: app_c
 
 ### 3.3 Agent 能力
 
-| 能力 | 状态 | 说明 |
-|---|---|---|
+| 能力          | 状态 | 说明                                                                            |
+| ----------- | -- | ----------------------------------------------------------------------------- |
 | 代码注册 + 启动校验 | 完成 | `AgentRegistry` 注册 `AgentDefinition`；启动时校验 `aegra.json` 中每个 Agent 都有对应图，缺失即失败 |
-| 按 ID 调用 | 完成 | `POST /api/v1/agents/{agent_id}/chat` |
-| 多轮对话 | 完成 | 会话 1:1 绑定运行时 thread，checkpoint 保留上下文 |
-| 工具调用 | 完成 | 工具事件在流式响应中独立下发 |
-| 流式输出 | 完成 | `POST /api/v1/agents/{agent_id}/chat/stream` |
-| 权限控制 | 完成 | 按应用 `allowed_agents` 过滤；`["*"]` 全允许、`[]` 全禁止 |
+| 按 ID 调用     | 完成 | `POST /api/v1/agents/{agent_id}/chat`                                         |
+| 多轮对话        | 完成 | 会话 1:1 绑定运行时 thread，checkpoint 保留上下文                                          |
+| 工具调用        | 完成 | 工具事件在流式响应中独立下发                                                                |
+| 流式输出        | 完成 | `POST /api/v1/agents/{agent_id}/chat/stream`                                  |
+| 权限控制        | 完成 | 按应用 `allowed_agents` 过滤；`["*"]` 全允许、`[]` 全禁止                                  |
 
-**四个已注册 Agent**
+**五个已注册 Agent**
 
-| Agent | 用途 | 实现方式 |
-|---|---|---|
-| `assistant_agent` | **编排型参考实现** | `plan → tools → plan` ReAct 循环；模型驱动工具选择；3 个真实工具；循环保护；模型不可用时规则降级 |
-| `llm_agent` | 纯模型对话 | 单节点，模型来自 `biz.model_configs` |
-| `echo_agent` | 引擎冒烟 / 工具链路验证 | 确定性回复 + `get_server_time` 工具 |
-| `reverse_agent` | 多 Agent 独立调用验证 | 确定性文本反转 |
+| Agent             | 用途             | 实现方式                                                            |
+| ----------------- | -------------- | --------------------------------------------------------------- |
+| `assistant_agent` | **编排型参考实现**    | `plan → tools → plan` ReAct 循环；模型驱动工具选择；3 个真实工具；循环保护；模型不可用时规则降级 |
+| `llm_agent`       | 纯模型对话          | 单节点，模型来自 `biz.model_configs`                                    |
+| `simple_agent`    | **`create_agent` 参考实现** | `langchain.agents.create_agent(model, tools, system_prompt)` 一步生成，约 30 行 |
+| `echo_agent`      | 引擎冒烟 / 工具链路验证  | 确定性回复 + `get_server_time` 工具                                    |
+| `reverse_agent`   | 多 Agent 独立调用验证 | 确定性文本反转                                                         |
 
 `assistant_agent` 是新增的重点，它把「一个 Agent 该有的东西」写全了：
 
@@ -153,7 +156,7 @@ START → plan ─┬─(有 tool_calls)→ tools ─┐
               └─(无 tool_calls)→ END   └──→ plan     ← 循环，直到出答案或触上限
 ```
 
-- **模型来自配置**：每次 `plan` 从 `biz.model_configs` 取 `DEFAULT_MODEL_CONFIG` 指定的配置。
+- **模型来自配置**：每次 `plan` 从 `biz.model_configs` 取配置；默认 `DEFAULT_MODEL_CONFIG`，单个 Agent 可用 `MODEL_CONFIG_<AGENT_ID>` 覆盖。
 - **工具**：`calculator`（AST 白名单求值，禁止 `eval`，限表达式长度/指数、拦除零）、`current_time`、`text_stats`。
 - **循环保护**：按 state 中 `ToolMessage` 数量计轮次，达 `AGENT_MAX_TOOL_ITERATIONS`（默认 4）强制收尾并返回明确提示，不依赖 `recursion_limit` 抛异常。
 - **离线可跑**：`echo` 这类不支持 tool calling 的 provider 自动切规则路由，节点、边、工具循环完全一致，CI 无需 API Key。
@@ -174,31 +177,31 @@ START → plan ─┬─(有 tool_calls)→ tools ─┐
 
 事件契约（对外只暴露这五种，运行时内部结构不外泄）：
 
-| 事件 | 时机 | 负载 |
-|---|---|---|
-| `meta` | 立即 | `thread_id`、`conversation_id`、`run_id` |
-| `token` | 每个增量 | `{"delta": "..."}`，**增量而非累计快照** |
-| `tool_call` | 模型发起工具调用 | `call_id`、`name`、`arguments` |
-| `tool_result` | 工具返回 | `call_id`、`name`、`content` |
-| `done` | 正常结束 | `conversation_id`、`message_id`、`run_id` |
-| `error` | 失败 | `code`、`message`；此后不发 `done` |
+| 事件            | 时机       | 负载                                      |
+| ------------- | -------- | --------------------------------------- |
+| `meta`        | 立即       | `thread_id`、`conversation_id`、`run_id`  |
+| `token`       | 每个增量     | `{"delta": "..."}`，**增量而非累计快照**         |
+| `tool_call`   | 模型发起工具调用 | `call_id`、`name`、`arguments`            |
+| `tool_result` | 工具返回     | `call_id`、`name`、`content`              |
+| `done`        | 正常结束     | `conversation_id`、`message_id`、`run_id` |
+| `error`       | 失败       | `code`、`message`；此后不发 `done`            |
 
 关键实现：Aegra 原生的 `messages/partial` 是**累计快照**且带大量内部 metadata（`langgraph_node`、`thread_id` 等）。`RuntimeAdapter` 在中间做差量计算，业务层只收到增量文本；直接透传会把内部结构泄漏给业务方，也逼着前端自己做 diff。
 
 ### 3.6 Workflow 能力
 
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| 注册与发现 | 完成 | `WorkflowRegistry` + `GET /api/v1/workflows`，返回 `input_schema` |
-| 输入校验 | 完成 | 每个 Workflow 自带 Pydantic 模型且 `extra="forbid"` |
-| 同步执行 | 完成 | `mode=sync`，请求内等待，超时 30s 后取消并返回 504 |
-| 异步执行 | 完成 | `mode=async`（默认），202 + `run_id` |
-| 状态查询 | 完成 | `GET /workflows/runs/{run_id}`，含 `started_at` / `finished_at` / `heartbeat_at` |
-| 结果查询 | 完成 | `GET /workflows/runs/{run_id}/result`，未终态返回 409 |
-| 取消 | 完成 | `POST /workflows/runs/{run_id}/cancel`，已终态返回 409 |
-| 列表 | 完成 | `GET /workflows/runs`，按身份过滤 + 游标分页 |
-| 超时 | 完成 | 服务端超时后取消运行时 run 并记 `timed_out`，不是放任继续跑 |
-| 并发限制 | 完成 | 按应用 `max_concurrent_workflow_runs` + 进程级 `WORKFLOW_INSTANCE_MAX_RUNS`，超出 429 |
+| 能力    | 状态 | 说明                                                                             |
+| ----- | -- | ------------------------------------------------------------------------------ |
+| 注册与发现 | 完成 | `WorkflowRegistry` + `GET /api/v1/workflows`，返回 `input_schema`                 |
+| 输入校验  | 完成 | 每个 Workflow 自带 Pydantic 模型且 `extra="forbid"`                                   |
+| 同步执行  | 完成 | `mode=sync`，请求内等待，超时 30s 后取消并返回 504                                            |
+| 异步执行  | 完成 | `mode=async`（默认），202 + `run_id`                                                |
+| 状态查询  | 完成 | `GET /workflows/runs/{run_id}`，含 `started_at` / `finished_at` / `heartbeat_at` |
+| 结果查询  | 完成 | `GET /workflows/runs/{run_id}/result`，未终态返回 409                                |
+| 取消    | 完成 | `POST /workflows/runs/{run_id}/cancel`，已终态返回 409                               |
+| 列表    | 完成 | `GET /workflows/runs`，按身份过滤 + 游标分页                                             |
+| 超时    | 完成 | 服务端超时后取消运行时 run 并记 `timed_out`，不是放任继续跑                                         |
+| 并发限制  | 完成 | 按应用 `max_concurrent_workflow_runs` + 进程级 `WORKFLOW_INSTANCE_MAX_RUNS`，超出 429   |
 
 **状态机**
 
@@ -213,9 +216,9 @@ pending ──→ running ──→ succeeded
 
 **两个已注册 Workflow**
 
-| Workflow | 输入 | 特点 |
-|---|---|---|
-| `sum_workflow` | `{a, b}` | 最小示例，两数相加 |
+| Workflow              | 输入              | 特点                                |
+| --------------------- | --------------- | --------------------------------- |
+| `sum_workflow`        | `{a, b}`        | 最小示例，两数相加                         |
 | `text_stats_workflow` | `{text, top_n}` | 带条件分支：长文本走 `detailed` 节点，短文本走轻量节点 |
 
 ### 3.7 模型配置
@@ -256,34 +259,35 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 
 ### 3.10 部署与运维
 
-| 项 | 实现 |
-|---|---|
-| 镜像 | `python:3.13-slim` + uv 0.11.26；依赖层与代码层分离（改代码不重装依赖）；`uv sync --frozen --no-dev`；非 root 用户 `app` |
-| 编排 | `docker-compose.yml`：`ai-service` + `postgres:16-alpine` + `redis:7-alpine`（可选启停） |
-| 启动顺序 | 业务迁移 → 按需 upsert 应用/模型 → 启动服务（`scripts/entrypoint.sh`，幂等） |
-| 健康检查 | 容器探针调 `/health`，校验 PostgreSQL、checkpointer、store |
-| 资源上限 | `ai-service` 2G、`postgres` 1G、`redis` 256m；Redis `maxmemory-policy noeviction`（队列键被淘汰等于丢任务） |
-| 日志 | json-file，10m × 3 轮转 |
-| 停机 | `stop_grace_period: 30s`，留给进行中的 run 收尾 |
-| 端口 | 只绑 `127.0.0.1:2026`，`/threads`、`/runs`、`/assistants`、`/store`、`/crons` 需由反代屏蔽 |
-| 备份 | `scripts/backup-db.sh`：`pg_dump` + gzip + 完整性校验 + 保留期清理；实测可完整恢复到临时库 |
-| 数据卷 | 命名卷持久化，`down` 不丢数据（`down -v` 才删） |
+| 项    | 实现                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------- |
+| 镜像   | `python:3.13-slim` + uv 0.11.26；依赖层与代码层分离（改代码不重装依赖）；`uv sync --frozen --no-dev`；非 root 用户 `app` |
+| 编排   | `docker-compose.yml`：`ai-service` + `postgres:16-alpine` + `redis:7-alpine`（可选启停）               |
+| 启动顺序 | 业务迁移 → 按需 upsert 应用/模型 → 启动服务（`scripts/entrypoint.sh`，幂等）                                       |
+| 健康检查 | 容器探针调 `/health`，校验 PostgreSQL、checkpointer、store                                                |
+| 资源上限 | `ai-service` 2G、`postgres` 1G、`redis` 256m；Redis `maxmemory-policy noeviction`（队列键被淘汰等于丢任务）     |
+| 日志   | json-file，10m × 3 轮转                                                                            |
+| 停机   | `stop_grace_period: 30s`，留给进行中的 run 收尾                                                          |
+| 端口   | 只绑 `127.0.0.1:2026`，`/threads`、`/runs`、`/assistants`、`/store`、`/crons` 需由反代屏蔽                   |
+| 备份   | `scripts/backup-db.sh`：`pg_dump` + gzip + 完整性校验 + 保留期清理；实测可完整恢复到临时库                             |
+| 数据卷  | 命名卷持久化，`down` 不丢数据（`down -v` 才删）                                                                |
 
 ### 3.11 管理 CLI
 
-| 命令 | 作用 |
-|---|---|
-| `seed-apps --file` | 按 JSON upsert 应用配置（幂等） |
-| `list-apps` | 列出应用，不输出密钥 |
-| `seed-models --file` | 按 JSON upsert 模型配置 |
-| `list-models` | 列出模型配置，只显示密钥引用 |
-| `validate` | 校验全部 `secret_ref`、公钥引用、模型密钥引用，任一失败退出码 1 |
+| 命令                   | 作用                                      |
+| -------------------- | --------------------------------------- |
+| `seed-apps --file`   | 按 JSON upsert 应用配置（幂等）                  |
+| `list-apps`          | 列出应用，不输出密钥                              |
+| `seed-models --file` | 按 JSON upsert 模型配置                      |
+| `list-models`        | 列出模型配置，只显示密钥引用                          |
+| `validate`           | 校验全部 `secret_ref`、公钥引用、模型密钥引用，任一失败退出码 1 |
 
 ---
 
 ## 4. API 契约
 
 统一前缀 `/api/v1`，所有接口要求 `Authorization: Bearer <JWT>` + `X-App-Id: <app_id>`。
+
 
 | 方法 | 路径 | 说明 | 成功 |
 |---|---|---|---|
@@ -366,6 +370,7 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 | `WORKFLOW_HEARTBEAT_SECONDS` | `10` | 轮询者心跳间隔（运维信号） |
 | `MODEL_CONFIG_CACHE_TTL_SECONDS` | `60` | 模型配置缓存 |
 | `DEFAULT_MODEL_CONFIG` | `demo` | Agent 默认引用的模型配置名 |
+| `MODEL_CONFIG_<AGENT_ID>` | 无 | 单 Agent 覆盖，如 `MODEL_CONFIG_SIMPLE_AGENT=deepseek` |
 | `AGENT_MAX_TOOL_ITERATIONS` | `4` | 单轮最多工具往返次数 |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | — | Compose 用 |
 | `HOST_PORT` | `2026` | 宿主机端口 |
@@ -378,7 +383,7 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 
 ## 7. 质量与验证
 
-### 7.1 测试分布（133 个）
+### 7.1 测试分布（136 个）
 
 | 文件 | 数量 | 覆盖内容 |
 |---|---|---|
@@ -387,9 +392,10 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 | `test_assistant_agent.py` | 14 | 工具路由、表达式解析、循环保护、多轮、降级路径 |
 | `test_chat_api.py` | 12 | 同步/流式对话、失败落库、断流保留 |
 | `test_models.py` | 10 | 模型解析、provider、密钥引用、缓存 |
+| `test_simple_agent.py` | 3 | `create_agent` 图可执行、echo 下不挂工具节点、按 Agent 覆盖模型 |
 | `test_workflow_registry.py` | 9 | 注册、重复、缺失图、输入契约 |
 | `test_auth_manager.py` | 9 | 认证桥接、身份、缓存刷新、错误码 |
-| 其余 12 个文件 | 44 | 隔离、权限、迁移、Adapter、SSE 解析、API 冒烟等 |
+| 其余 12 个文件 | 41 | 隔离、权限、迁移、Adapter、SSE 解析、API 冒烟等 |
 
 ### 7.2 真实验证记录（非单测）
 
@@ -477,6 +483,7 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 | `52a1509` | feat(deploy): P4 Docker Compose 部署、健康检查、备份与验收对照 |
 | `4a08e96` | feat(multi-replica): Redis、读时对账、应用维度配额与模型配置接入 |
 | `8345eeb` | feat(agent): 新增编排型参考 Agent（plan/tools 循环 + 循环保护） |
+| `4b053b4` | feat(agent): 引入 create_agent 版 Agent、工具抽离与按 Agent 的模型路由 |
 
 配套文档：
 
@@ -484,6 +491,7 @@ start_run / get_run / cancel_run（异步执行与生命周期）
 - [`adr/0001-runtime-choice.md`](adr/0001-runtime-choice.md) — 运行底座选型与 Spike 结论
 - [`adr/0002-multi-replica.md`](adr/0002-multi-replica.md) — 多副本与读时对账
 - [`acceptance.md`](acceptance.md) — 验收对照与已知限制
+- [`guide-agents-and-models.md`](guide-agents-and-models.md) — 换模型提供商、新增 Agent 的实操指南
 
 ---
 
@@ -512,7 +520,7 @@ app/
 migrations/                  Alembic（biz.biz_alembic_version）
 scripts/                     entrypoint / healthcheck / backup-db
 seed/                        应用与模型示例配置
-tests/                       133 个测试
+tests/                       136 个测试
 docs/                        需求、ADR、验收、本报告
 ```
 
