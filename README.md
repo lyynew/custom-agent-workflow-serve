@@ -10,7 +10,7 @@
 |---|---|---|
 | P0 Spike | 完成 | 认证查库、自定义路由、SSE 适配、跨应用隔离、资源与迁移验证 |
 | P1 基础与认证 | 完成 | 工程骨架、`biz` schema、Alembic、JWT 校验、应用缓存、隔离仓储、`RuntimeAdapter`、39 个测试 |
-| P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件、67 个测试 |
+| P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件、69 个测试 |
 | P3 Workflow | 待开始 | Workflow Registry、同步 / 异步执行、状态与结果 |
 | P4 交付 | 待开始 | Docker Compose、健康检查、备份、重启恢复、全量验收 |
 
@@ -43,7 +43,7 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
-├── agents/                 Agent Registry 与示例 Agent（echo_agent）
+├── agents/                 Agent Registry 与示例 Agent（echo_agent / reverse_agent）
 ├── services/               会话编排、消息持久化
 ├── models/                 SQLAlchemy 模型（biz schema）
 ├── repositories/           强制按 (app_id, user_id) 过滤的仓储

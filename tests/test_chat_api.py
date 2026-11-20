@@ -249,6 +249,28 @@ async def test_chat_without_conversation_id_generates_title(
     assert conversation.json()["title"] == "hello world"
 
 
+async def test_each_agent_is_called_independently(
+    seeded_apps, authenticated_as, asgi_client, fake_runtime
+):
+    authenticated_as(_user())
+    fake_runtime.assistant_text = "ok"
+
+    echo = await asgi_client.post(
+        "/api/v1/agents/echo_agent/chat",
+        json={"message": "hi"},
+    )
+    reverse = await asgi_client.post(
+        "/api/v1/agents/reverse_agent/chat",
+        json={"message": "hi"},
+    )
+
+    assert echo.status_code == 200
+    assert reverse.status_code == 200
+    assert fake_runtime.wait_calls[0]["graph_id"] == "echo_agent"
+    assert fake_runtime.wait_calls[1]["graph_id"] == "reverse_agent"
+    assert echo.json()["conversation_id"] != reverse.json()["conversation_id"]
+
+
 async def test_sync_runtime_failure_returns_502(
     seeded_apps, authenticated_as, asgi_client, fake_runtime
 ):

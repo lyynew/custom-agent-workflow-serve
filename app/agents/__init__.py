@@ -10,4 +10,13 @@ agent_registry.register(
     )
 )
 
+agent_registry.register(
+    AgentDefinition(
+        agent_id="reverse_agent",
+        name="Reverse Agent",
+        description="Deterministic demo agent that reverses the user's text.",
+        tags=("demo",),
+    )
+)
+
 __all__ = ["AgentDefinition", "agent_registry"]

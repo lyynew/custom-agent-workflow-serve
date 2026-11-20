@@ -5,6 +5,10 @@
     "echo_agent": {
       "path": "./app/agents/implementations/echo_agent.py:graph",
       "description": "Deterministic demo agent with a server-time tool"
+    },
+    "reverse_agent": {
+      "path": "./app/agents/implementations/reverse_agent.py:graph",
+      "description": "Deterministic demo agent that reverses user text"
     }
   },
   "auth": {
