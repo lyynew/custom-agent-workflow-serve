@@ -32,8 +32,17 @@ agent_registry.register(
     AgentDefinition(
         agent_id="assistant_agent",
         name="Assistant Agent",
-        description="Reference agent: model-driven planning with a calculator, clock and text-stats tool loop.",
+        description="Hand-written StateGraph: plan/tools loop with a loop guard.",
         tags=("llm", "tool", "reference"),
+    )
+)
+
+agent_registry.register(
+    AgentDefinition(
+        agent_id="simple_agent",
+        name="Simple Agent",
+        description="Built with LangChain create_agent: model + tools + system prompt.",
+        tags=("llm", "tool", "demo"),
     )
 )
 

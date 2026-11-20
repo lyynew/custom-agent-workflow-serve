@@ -9,9 +9,9 @@ from app.agents.implementations import assistant_agent
 from app.agents.implementations.assistant_agent import (
     LOOP_GUARD_MESSAGE,
     build_graph,
-    calculator,
     graph,
 )
+from app.agents.tools import calculator
 from app.config import get_settings
 from app.repositories.model_configs import ModelConfigRepository
 from app.services.models import model_resolver

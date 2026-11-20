@@ -26,6 +26,7 @@ async def test_wildcard_lists_registered_agents(
         "echo_agent",
         "llm_agent",
         "reverse_agent",
+        "simple_agent",
     ]
 
 

@@ -44,7 +44,7 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
-├── agents/                 Agent Registry 与示例 Agent（assistant / echo / reverse / llm）
+├── agents/                 Agent Registry 与示例 Agent（assistant / simple / echo / reverse / llm）
 ├── workflows/              Workflow Registry 与示例 Workflow（sum / text_stats）
 ├── services/               会话编排、消息持久化、Workflow 执行编排、模型解析、限流
 ├── cache/                  Redis 客户端（不可用时自动降级）
@@ -271,12 +271,31 @@ curl -s -X POST http://127.0.0.1:2026/api/v1/workflows/sum_workflow/execute \
 
 ### 新增 Agent
 
-1. 写一个 LangGraph 图并 `compile()`，放在 `app/agents/implementations/`。
-2. 在 `aegra.json` 的 `graphs` 中增加 `agent_id → 图路径`。
-3. 在 `app/agents/__init__.py` 注册 `AgentDefinition`。
+一个 Agent 由三处构成，缺一处起不来：
+
+1. `app/agents/implementations/xxx.py`：图实现，导出名为 `graph` 的对象或**零参数工厂**；
+2. `aegra.json` 的 `graphs`：`agent_id → 图路径`；
+3. `app/agents/__init__.py`：注册 `AgentDefinition`（决定列表展示与权限）；
 4. 重启服务；启动时会校验每个注册 Agent 都有对应的图。
 
-参考实现见 `app/agents/implementations/assistant_agent.py`，它把 Agent 该有的四件事都写全了：
+两条路线，按需要选：
+
+| 路线 | 示例文件 | 适合 |
+|---|---|---|
+| `create_agent`（LangChain 预置工厂） | `simple_agent.py`，约 30 行 | 「模型 + 工具 + 提示词」就够用，绝大多数业务 Agent |
+| 手写 `StateGraph` | `assistant_agent.py` | 需要自定义路由、自有 state、或模型不支持 tool calling 时降级 |
+
+`create_agent` 版的核心就是这么点：
+
+```python
+async def build():
+    resolved = await model_resolver.resolve_full(get_settings().model_config_for("simple_agent"))
+    return create_agent(model=resolved.model, tools=TOOLS, system_prompt=SYSTEM_PROMPT, name="simple_agent")
+
+graph = build    # 零参数工厂：Aegra 启动时调用一次，拿到编译好的图
+```
+
+手写版的图结构：
 
 ```text
 START → plan ─┬─(有 tool_calls)→ tools ─┐
@@ -284,16 +303,18 @@ START → plan ─┬─(有 tool_calls)→ tools ─┐
               └─(无 tool_calls)→ END   └──→ plan   ← 循环，直到给出答案或触到上限
 ```
 
-- **模型来自配置**：`plan` 节点每次调用 `biz.model_configs` 里的模型，不写死；
+- **模型来自配置**：每次从 `biz.model_configs` 取，不写死；
 - **工具**：`calculator`（AST 求值，不走 `eval`）、`current_time`、`text_stats`；
-- **循环保护**：`AGENT_MAX_TOOL_ITERATIONS`（默认 4）轮后强制收尾，避免模型无限调工具；
-- **离线可跑**：`echo` 这类不支持 tool calling 的 provider 自动切到规则路由，节点、边、工具循环完全一致，CI 不需要 API key。
+- **循环保护**：`AGENT_MAX_TOOL_ITERATIONS`（默认 4）轮后强制收尾；
+- **离线可跑**：`echo` 这类不支持 tool calling 的 provider 自动切规则路由，CI 不需要 API key。
 
-拷贝这个文件改 `SYSTEM_PROMPT` 和 `TOOLS` 就能作为新业务 Agent 的起点。
+完整操作步骤、换模型提供商的三种方式、常见报错对照，见 **[docs/guide-agents-and-models.md](docs/guide-agents-and-models.md)**。
 
 ## 模型配置
 
-Agent 不写死模型。`llm_agent` 在调用时按名字从 `biz.model_configs` 取配置并构建 LangChain 客户端，`DEFAULT_MODEL_CONFIG`（默认 `demo`）决定用哪一条。
+Agent 不写死模型。调用时按名字从 `biz.model_configs` 取配置并构建 LangChain 客户端，`DEFAULT_MODEL_CONFIG`（默认 `demo`）决定用哪一条；单个 Agent 可用 `MODEL_CONFIG_<AGENT_ID>` 覆盖，例如 `MODEL_CONFIG_SIMPLE_AGENT=deepseek`。
+
+`provider` 只有两种取值：`openai`（**任何** OpenAI 兼容接口——DeepSeek、通义、Kimi、vLLM、Ollama、one-api 都属于这一类，只改 `base_url` 与 `model_name`）和 `echo`（离线确定性，供本地与测试）。
 
 | 字段 | 说明 |
 |---|---|

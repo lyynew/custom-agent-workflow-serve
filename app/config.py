@@ -4,6 +4,7 @@ Environment variables win over `.env`, which keeps tests and containers in
 control of the database URL and secrets.
 """
 
+import os
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -62,6 +63,16 @@ class Settings(BaseSettings):
 
     #: Tool rounds one agent turn may take before the loop guard stops it.
     agent_max_tool_iterations: int = Field(default=4, ge=1)
+
+    def model_config_for(self, agent_id: str) -> str:
+        """Which `biz.model_configs` row an agent should use.
+
+        `MODEL_CONFIG_<AGENT_ID>` (upper-case, e.g. `MODEL_CONFIG_SIMPLE_AGENT`)
+        overrides the global default for one agent. Read from the environment on
+        every call so switching a provider needs no code change and no restart.
+        """
+        override = os.environ.get(f"MODEL_CONFIG_{agent_id.upper()}")
+        return override or self.default_model_config
 
     @field_validator("database_url")
     @classmethod

@@ -18,7 +18,7 @@ SYSTEM_PROMPT = (
 
 
 async def agent_node(state: MessagesState) -> dict:
-    model = await model_resolver.resolve(get_settings().default_model_config)
+    model = await model_resolver.resolve(get_settings().model_config_for("llm_agent"))
     reply = await model.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
     return {"messages": [reply]}
 

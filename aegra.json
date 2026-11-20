@@ -18,6 +18,10 @@
       "path": "./app/agents/implementations/assistant_agent.py:graph",
       "description": "Reference agent: plan/tools ReAct loop with a loop guard"
     },
+    "simple_agent": {
+      "path": "./app/agents/implementations/simple_agent.py:graph",
+      "description": "Built with langchain create_agent (model + tools + prompt)"
+    },
     "sum_workflow": {
       "path": "./app/workflows/implementations/sum_workflow.py:graph",
       "description": "Minimal workflow: adds two integers"
