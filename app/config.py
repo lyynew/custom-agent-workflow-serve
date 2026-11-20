@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     #: Tool rounds one agent turn may take before the loop guard stops it.
     agent_max_tool_iterations: int = Field(default=4, ge=1)
+    #: Web searches one conversation turn may spend (0 disables the tool).
+    agent_max_web_searches: int = Field(default=3, ge=0)
 
     def model_config_for(self, agent_id: str) -> str:
         """Which `biz.model_configs` row an agent should use.

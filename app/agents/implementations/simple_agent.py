@@ -17,7 +17,7 @@ from typing import Any
 
 from langchain.agents import create_agent
 
-from app.agents.tools import TOOLS
+from app.agents.tools import TOOL_CALLING_PROVIDERS, TOOLS
 from app.config import get_settings
 from app.services.models import model_resolver
 
@@ -25,10 +25,6 @@ SYSTEM_PROMPT = (
     "你是企业内部助手。需要精确结果时优先调用工具，不要凭记忆做算术或猜测当前时间。"
     "确认信息不足时直接说明，不要编造。回答简洁。"
 )
-
-#: Providers whose models implement `bind_tools`. Passing tools to a model that
-#: does not support them fails at build time, so the demo provider gets none.
-TOOL_CALLING_PROVIDERS = frozenset({"openai"})
 
 
 async def build() -> Any:

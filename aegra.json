@@ -22,6 +22,10 @@
       "path": "./app/agents/implementations/simple_agent.py:graph",
       "description": "Built with langchain create_agent (model + tools + prompt)"
     },
+    "bingfeng_agent": {
+      "path": "./app/agents/implementations/bingfeng_agent.py:graph",
+      "description": "兵峰耘农：农业助手 + 联网搜索（每轮最多 3 次）"
+    },
     "sum_workflow": {
       "path": "./app/workflows/implementations/sum_workflow.py:graph",
       "description": "Minimal workflow: adds two integers"

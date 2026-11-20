@@ -16,6 +16,10 @@ from langchain_core.tools import BaseTool, tool
 MAX_EXPRESSION_LENGTH = 200
 MAX_EXPONENT = 100
 
+#: Providers whose models implement `bind_tools`. Binding tools on any other
+#: provider fails at build time, so callers must check this first.
+TOOL_CALLING_PROVIDERS = frozenset({"openai"})
+
 _OPERATORS: dict[type[ast.operator], Callable[[float, float], float]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -113,6 +117,7 @@ FULLWIDTH = str.maketrans(
 __all__ = [
     "FULLWIDTH",
     "TOOLS",
+    "TOOL_CALLING_PROVIDERS",
     "calculator",
     "current_time",
     "text_stats",

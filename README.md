@@ -44,7 +44,7 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
-├── agents/                 Agent Registry 与示例 Agent（assistant / simple / echo / reverse / llm）
+├── agents/                 Agent Registry 与 Agent 实现（assistant / simple / bingfeng / echo / reverse / llm）
 ├── workflows/              Workflow Registry 与示例 Workflow（sum / text_stats）
 ├── services/               会话编排、消息持久化、Workflow 执行编排、模型解析、限流
 ├── cache/                  Redis 客户端（不可用时自动降级）
@@ -333,6 +333,19 @@ uv run python -m app.cli list-models     # 只输出 key 引用，不输出密�
 换供应商、换模型、调温度都是改配置行，不改代码；`MODEL_CONFIG_CACHE_TTL_SECONDS`（默认 60s）后生效。配置缺失或被禁用时，Agent 直接报错而不是静默降级。
 
 仓库内置 `deepseek` 配置（`seed/models.example.json`）：在 `.env` 填 `DEEPSEEK_API_KEY`，`seed-models` 后即可用；切换默认只需 `DEFAULT_MODEL_CONFIG=deepseek`。
+
+## 联网搜索
+
+`web_search` 工具走 [Tavily](https://tavily.com)，在 `app/agents/web_search.py`。
+
+```bash
+TAVILY_API_KEY=tvly-xxx      # 只放环境变量，不进数据库、不进仓库
+AGENT_MAX_WEB_SEARCHES=3     # 每轮对话上限，0 = 关闭
+```
+
+上限是**硬约束**，不靠提示词：次数用尽后 `web_search` 不再绑定给模型，模型想调也没有这个工具；单条回复里超额的调用还会被裁剪一次。次数从 state 里的 `ToolMessage` 统计，所以多轮对话各自独立，重启后也不会算错。
+
+搜索失败（套餐超限、网络异常、未配密钥）不会中断执行，工具返回一段错误说明，由模型决定"基于已有知识回答并声明未能联网核实"。
 
 ## 测试
 

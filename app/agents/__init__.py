@@ -46,4 +46,13 @@ agent_registry.register(
     )
 )
 
+agent_registry.register(
+    AgentDefinition(
+        agent_id="bingfeng_agent",
+        name="兵峰耘农",
+        description="农业助手：种植、病虫害、用药、施肥、政策；支持联网搜索（每轮最多 3 次）。",
+        tags=("llm", "tool", "agriculture", "web"),
+    )
+)
+
 __all__ = ["AgentDefinition", "agent_registry"]

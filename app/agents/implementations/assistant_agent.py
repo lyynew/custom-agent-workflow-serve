@@ -30,7 +30,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from app.agents.tools import FULLWIDTH, TOOLS
+from app.agents.tools import FULLWIDTH, TOOL_CALLING_PROVIDERS, TOOLS
 from app.config import get_settings
 from app.services.models import model_resolver
 
@@ -42,10 +42,6 @@ SYSTEM_PROMPT = (
 )
 
 LOOP_GUARD_MESSAGE = "工具调用次数已达上限，已停止执行。请把问题拆成更具体的小问题。"
-
-#: Providers whose models support native tool calling. Anything else falls back
-#: to deterministic routing.
-TOOL_CALLING_PROVIDERS = frozenset({"openai"})
 
 _EXPRESSION_RE = re.compile(r"[-+(]*\d[\d\s.+\-*/%()]*")
 _OPERATOR_CHARS = "+-*/%"

@@ -23,6 +23,7 @@ async def test_wildcard_lists_registered_agents(
     assert response.status_code == 200
     assert [agent["agent_id"] for agent in response.json()] == [
         "assistant_agent",
+        "bingfeng_agent",
         "echo_agent",
         "llm_agent",
         "reverse_agent",
