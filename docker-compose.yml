@@ -1,0 +1,83 @@
+name: ai-service
+
+# Single-instance deployment for a 4C/4G host (see docs/adr/0001-runtime-choice.md).
+#
+# Do NOT scale `ai-service` beyond one replica: background workflow pollers live
+# in-process and there is no shared queue (Redis is disabled on purpose), so a
+# second replica would neither see nor finish the first one's runs.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aegra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_service}
+      # Deterministic collation: index order must not depend on the host locale.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_connections=100
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegra} -d ${POSTGRES_DB:-ai_service}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ai-service:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Inside the network the database is reachable by service name; the values
+      # in `.env` describe the host-side setup and must not leak into the container.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aegra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_service}
+      # The runtime adapter calls this same process over loopback.
+      SELF_URL: http://127.0.0.1:2026
+      HOST: 0.0.0.0
+      PORT: "2026"
+      # Optional: upsert demo applications on boot (idempotent). Clear it in production.
+      SEED_APPLICATIONS_FILE: ${SEED_APPLICATIONS_FILE:-}
+    # Bound to loopback on purpose: /threads, /runs and /assistants must be
+    # shielded by a reverse proxy, only /api/v1 is meant to face the internet.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-2026}:2026"
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    mem_limit: 2g
+    # Long enough for the shutdown hook to mark in-flight runs `interrupted`.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:

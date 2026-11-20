@@ -11,8 +11,8 @@
 | P0 Spike | 完成 | 认证查库、自定义路由、SSE 适配、跨应用隔离、资源与迁移验证 |
 | P1 基础与认证 | 完成 | 工程骨架、`biz` schema、Alembic、JWT 校验、应用缓存、隔离仓储、`RuntimeAdapter`、39 个测试 |
 | P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件 |
-| P3 Workflow | 完成 | Workflow Registry、同步 / 异步执行、run 状态与结果、取消与超时、98 个测试 |
-| P4 交付 | 待开始 | Docker Compose、健康检查、备份、重启恢复、全量验收 |
+| P3 Workflow | 完成 | Workflow Registry、同步 / 异步执行、run 状态与结果、取消与超时 |
+| P4 交付 | 完成 | Docker Compose、健康检查、备份脚本、断流保留、验收对照（[docs/acceptance.md](docs/acceptance.md)） |
 
 ## 架构
 
@@ -51,7 +51,9 @@ app/
 ├── database/               异步引擎与会话
 └── runtime/                RuntimeAdapter（业务层不依赖 Aegra 类型）
 migrations/                 Alembic（biz.biz_alembic_version）
-tests/                      认证、隔离、迁移、API、Adapter 测试
+scripts/                    容器入口、健康检查、备份
+tests/                      认证、隔离、迁移、API、Adapter、Workflow 测试
+Dockerfile / docker-compose.yml
 spike/aegra/                P0 验证工程（不是生产代码）
 ```
 
@@ -105,6 +107,39 @@ curl -s -X POST http://127.0.0.1:2026/api/v1/agents/echo_agent/chat \
   -H "Content-Type: application/json" -d '{"message":"hello"}'
 ```
 
+## 部署（Docker Compose）
+
+前置：Docker 24+ 与 Compose v2，建议 4C / 4G 起。
+
+```bash
+cp .env.example .env     # 至少替换 POSTGRES_PASSWORD、AGRI_JWT_SECRET、MGMT_JWT_SECRET
+docker compose up -d --build
+docker compose ps        # ai-service 变为 healthy 即可用
+curl -s http://127.0.0.1:2026/health
+```
+
+首次启动顺序：Postgres healthy → `alembic upgrade head`（`biz`）→ 按需 upsert 应用 → Aegra 迁移（`public`）→ 监听端口。两套迁移都幂等，重启安全。
+
+资源与安全边界：
+
+- 端口只绑定 `127.0.0.1`。`/threads`、`/runs`、`/assistants`、`/store`、`/crons` 是运行时内部接口，**必须**由反代屏蔽，只对外暴露 `/api/v1`。
+- `ai-service` 限 2G、`postgres` 限 1G，日志 json-file 10m × 3。
+- 固定单副本。后台工作流轮询在进程内且没有共享队列，`--scale` 会让其他副本看不到这些 run。
+- `stop_grace_period: 30s` 留出时间把进行中的 run 标为 `interrupted`。
+
+备份与恢复：
+
+```bash
+./scripts/backup-db.sh                      # 写 ./backups，保留 7 天
+BACKUP_DIR=/var/backups/ai RETENTION_DAYS=14 ./scripts/backup-db.sh
+
+gunzip -c backups/ai_service-20261120-153406.sql.gz \
+  | docker compose exec -T postgres psql -U aegra -d ai_service
+docker compose restart ai-service
+```
+
+`pg_dump` 取 MVCC 快照，备份期间可继续服务；dump 同时包含 `biz`（业务表）与 `public`（Aegra 表）。
+
 ## 认证契约
 
 请求头：
@@ -120,6 +155,7 @@ X-App-Id: <app_id>
 - 身份统一为 `app_id:user_id`；相同 `user_id` 在不同应用下是两个人。
 - 越权统一返回 404，不区分「不存在」与「不属于你」。
 - `allowed_agents` / `allowed_workflows`：`["*"]` 全允许，`[]` 全禁止。
+- 业务错误统一为 `{"error": {"code", "message", "request_id"}}`；唯一例外是 401，它由 Aegra 的认证依赖在进入业务路由前产生，使用 Aegra 自己的信封。集成方请以 HTTP 状态码判断。
 
 ## 接口
 
@@ -226,6 +262,13 @@ uv run ruff check app tests
 
 ## 下一步
 
-P4：Docker Compose 独立部署、健康检查、数据库备份、重启恢复演练、全量验收对照。
+验收对照、部署验证记录与已知限制见 [`docs/acceptance.md`](docs/acceptance.md)。
+
+若要继续演进，优先级建议：
+
+1. 引入 Redis（`REDIS_BROKER_ENABLED=true`）以支持多副本与进程崩溃后不丢 run；
+2. 给 `detach=true` 支持断流后继续执行；
+3. 模型配置（`biz.model_configs`）接入实际调用链；
+4. 按应用维度的限流与配额。
 
 更完整的背景与验收映射见 [`docs/requirements-analysis.md`](docs/requirements-analysis.md)。

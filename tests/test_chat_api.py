@@ -284,3 +284,44 @@ async def test_sync_runtime_failure_returns_502(
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "runtime_error"
+
+
+async def test_client_disconnect_keeps_the_partial_reply(
+    seeded_apps, agri_context, session, fake_runtime, workflow_launcher
+):
+    """Closing the stream mid-flight must not leave a half reply unsaved."""
+    from app.api.v1.agents import chat_stream
+    from app.api.v1.schemas import ChatRequest
+    from app.repositories.conversations import MessageRepository
+    from app.runtime.adapter import RuntimeCredentials
+
+    response = await chat_stream(
+        agent_id="echo_agent",
+        payload=ChatRequest(message="hi"),
+        user=_user(),
+        context=agri_context,
+        credentials=RuntimeCredentials(
+            app_id="agriculture_app", authorization="Bearer test-token"
+        ),
+        runtime=fake_runtime,
+        session=session,
+        launcher=workflow_launcher,
+    )
+
+    iterator = response.body_iterator
+    meta = await anext(iterator)
+    first_token = await anext(iterator)
+    assert "event: meta" in meta
+    assert "event: token" in first_token
+
+    # The client hangs up: Starlette closes the generator under our feet.
+    await iterator.aclose()
+    await workflow_launcher.drain()
+
+    conversation_id = json.loads(meta.split("data: ", 1)[1].strip())["conversation_id"]
+    messages = await MessageRepository(session, agri_context).list(conversation_id)
+
+    assert [(m.role, m.status, m.content) for m in messages] == [
+        ("user", "complete", "hi"),
+        ("assistant", "partial", "he"),
+    ]

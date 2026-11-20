@@ -1,5 +1,6 @@
 """Agent listing and chat endpoints."""
 
+import asyncio
 import logging
 
 from aegra_api.core.auth_deps import require_auth
@@ -13,6 +14,7 @@ from app.api.deps import (
     get_auth_context,
     get_runtime_adapter,
     get_runtime_credentials,
+    get_task_launcher,
 )
 from app.api.errors import APIError
 from app.api.sse import SSE_HEADERS, sse
@@ -38,6 +40,7 @@ from app.services.conversations import (
     persist_assistant_message,
     title_from_message,
 )
+from app.services.workflows import TaskLauncher
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +123,7 @@ async def chat_stream(
     credentials: RuntimeCredentials = Depends(get_runtime_credentials),
     runtime: RuntimeAdapter = Depends(get_runtime_adapter),
     session: AsyncSession = Depends(get_session),
+    launcher: TaskLauncher = Depends(get_task_launcher),
 ) -> StreamingResponse:
     ensure_agent_allowed(user, agent_id)
     ensure_registered_agent(agent_id)
@@ -176,6 +180,24 @@ async def chat_stream(
                     break
                 elif isinstance(event, RunFinished):
                     break
+        except (asyncio.CancelledError, GeneratorExit):
+            # The client closed the connection mid-stream. The runtime cancels
+            # the run by default (`on_disconnect=cancel`), and whatever was
+            # already sent to the client is kept as a partial message.
+            # Scheduled rather than awaited: yielding is illegal while the
+            # generator is being closed.
+            if chunks:
+                launcher.launch(
+                    f"sse-partial-{conversation.id}",
+                    persist_assistant_message(
+                        context,
+                        conversation.id,
+                        "".join(chunks),
+                        status="partial",
+                        run_id=run_id,
+                    ),
+                )
+            raise
         except RuntimeCallError as exc:
             failed = True
             logger.warning("Agent stream failed: %s", exc)

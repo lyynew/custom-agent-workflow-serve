@@ -28,3 +28,6 @@ spike/**/data/
 spike/**/tokens.json
 spike/**/stream.raw
 spike/**/*.log
+
+# Database backups
+backups/
