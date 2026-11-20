@@ -1,0 +1,49 @@
+[project]
+name = "custom-agent-workflow-serve"
+version = "0.1.0"
+description = "Multi-tenant Agent / Workflow service engine"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "aegra-api==0.12.0",
+    "aegra-cli==0.12.0",
+    "fastapi==0.165.0",
+    "uvicorn==0.54.0",
+    "sqlalchemy[asyncio]==2.1.9",
+    "asyncpg==0.32.0",
+    "alembic==1.20.1",
+    "pydantic==2.14.3",
+    "pydantic-settings==2.16.3",
+    "python-dotenv==1.2.4",
+    "pyjwt[crypto]==2.15.1",
+    "httpx==0.28.1",
+    "structlog==26.1.0",
+    "colorama==0.4.6; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/api/**" = ["B008"]

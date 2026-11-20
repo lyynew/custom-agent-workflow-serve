@@ -1,0 +1,12 @@
+{
+  "name": "custom-agent-workflow-serve",
+  "dependencies": ["."],
+  "graphs": {},
+  "auth": {
+    "path": "app.auth.manager:auth"
+  },
+  "http": {
+    "app": "app.main:app",
+    "enable_custom_route_auth": true
+  }
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "app_id": "agriculture_app",
+    "app_name": "农业业务系统",
+    "auth_type": "jwt",
+    "jwt_config": {
+      "algorithm": "HS256",
+      "secret_ref": "env:AGRI_JWT_SECRET",
+      "user_id_claim": "user_id",
+      "require_exp": true,
+      "leeway_seconds": 30
+    },
+    "allowed_agents": ["*"],
+    "allowed_workflows": ["*"],
+    "enabled": true
+  },
+  {
+    "app_id": "management_app",
+    "app_name": "管理业务系统",
+    "auth_type": "jwt",
+    "jwt_config": {
+      "algorithm": "HS256",
+      "secret_ref": "env:MGMT_JWT_SECRET",
+      "user_id_claim": "user_id",
+      "require_exp": true,
+      "leeway_seconds": 30
+    },
+    "allowed_agents": ["*"],
+    "allowed_workflows": ["*"],
+    "enabled": true
+  }
+]
