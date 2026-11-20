@@ -1,7 +1,12 @@
 {
   "name": "custom-agent-workflow-serve",
   "dependencies": ["."],
-  "graphs": {},
+  "graphs": {
+    "echo_agent": {
+      "path": "./app/agents/implementations/echo_agent.py:graph",
+      "description": "Deterministic demo agent with a server-time tool"
+    }
+  },
   "auth": {
     "path": "app.auth.manager:auth"
   },

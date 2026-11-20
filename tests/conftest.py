@@ -15,17 +15,23 @@ os.environ.setdefault("AGRI_JWT_SECRET", "test-agri-secret-0123456789abcdef01234
 os.environ.setdefault("MGMT_JWT_SECRET", "test-mgmt-secret-0123456789abcdef0123456789")
 
 import asyncpg
+import httpx
 import pytest
 import pytest_asyncio
+from aegra_api.core.auth_deps import require_auth
+from aegra_api.models.auth import User
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
+from app.api.deps import get_runtime_adapter
 from app.auth.context import AuthContext
 from app.auth.jwt import JwtConfig
 from app.auth.store import ApplicationConfig, application_store
 from app.database.session import dispose_engine, get_session_factory
+from app.main import app
 from app.repositories.applications import ApplicationRepository
+from tests.fakes import FakeRuntime
 
 
 def _split_database_url() -> tuple[str, str]:
@@ -135,3 +141,34 @@ def mgmt_context() -> AuthContext:
 @pytest.fixture
 def other_user_context() -> AuthContext:
     return AuthContext(app_id="agriculture_app", user_id="20002")
+
+
+@pytest_asyncio.fixture
+async def asgi_client():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": "Bearer test-token"},
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+def authenticated_as():
+    def _set(user: User) -> None:
+        async def _dependency() -> User:
+            return user
+
+        app.dependency_overrides[require_auth] = _dependency
+
+    yield _set
+    app.dependency_overrides.pop(require_auth, None)
+
+
+@pytest.fixture
+def fake_runtime():
+    runtime = FakeRuntime()
+    app.dependency_overrides[get_runtime_adapter] = lambda: runtime
+    yield runtime
+    app.dependency_overrides.pop(get_runtime_adapter, None)

@@ -9,8 +9,8 @@
 | 阶段 | 状态 | 内容 |
 |---|---|---|
 | P0 Spike | 完成 | 认证查库、自定义路由、SSE 适配、跨应用隔离、资源与迁移验证 |
-| P1 基础与认证 | 完成 | 工程骨架、`biz` schema、Alembic、JWT 校验、应用缓存、隔离仓储、`RuntimeAdapter`、36 个测试 |
-| P2 Agent 与会话 | 待开始 | Agent Registry、会话 / 消息 API、多轮对话、SSE |
+| P1 基础与认证 | 完成 | 工程骨架、`biz` schema、Alembic、JWT 校验、应用缓存、隔离仓储、`RuntimeAdapter`、39 个测试 |
+| P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件、67 个测试 |
 | P3 Workflow | 待开始 | Workflow Registry、同步 / 异步执行、状态与结果 |
 | P4 交付 | 待开始 | Docker Compose、健康检查、备份、重启恢复、全量验收 |
 
@@ -43,6 +43,8 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
+├── agents/                 Agent Registry 与示例 Agent（echo_agent）
+├── services/               会话编排、消息持久化
 ├── models/                 SQLAlchemy 模型（biz schema）
 ├── repositories/           强制按 (app_id, user_id) 过滤的仓储
 ├── database/               异步引擎与会话
@@ -96,6 +98,10 @@ PY
 
 curl -s -H "Authorization: Bearer $TOKEN" -H "X-App-Id: agriculture_app" \
   http://127.0.0.1:2026/api/v1/whoami
+
+curl -s -X POST http://127.0.0.1:2026/api/v1/agents/echo_agent/chat \
+  -H "Authorization: Bearer $TOKEN" -H "X-App-Id: agriculture_app" \
+  -H "Content-Type: application/json" -d '{"message":"hello"}'
 ```
 
 ## 认证契约
@@ -113,6 +119,45 @@ X-App-Id: <app_id>
 - 身份统一为 `app_id:user_id`；相同 `user_id` 在不同应用下是两个人。
 - 越权统一返回 404，不区分「不存在」与「不属于你」。
 - `allowed_agents` / `allowed_workflows`：`["*"]` 全允许，`[]` 全禁止。
+
+## 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/agents` | 仅返回当前应用 `allowed_agents` 内的 Agent |
+| POST | `/api/v1/agents/{agent_id}/chat` | 非流式对话 |
+| POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE 流式对话 |
+| POST | `/api/v1/conversations` | 创建会话（同时创建运行时 thread） |
+| GET | `/api/v1/conversations` | 会话列表（`agent_id` / `limit` / `before`） |
+| GET | `/api/v1/conversations/{id}` | 会话详情 |
+| GET | `/api/v1/conversations/{id}/messages` | 消息历史（`limit` / `before`） |
+| DELETE | `/api/v1/conversations/{id}` | 软删除会话，并尽力删除运行时 thread |
+
+对话请求体：
+
+```json
+{"message": "你好", "conversation_id": "可选；不传则自动创建会话"}
+```
+
+### SSE 事件契约
+
+```text
+event: meta         {conversation_id, thread_id, user_message_id, agent_id}
+event: token        {delta}
+event: tool_call    {call_id, name, arguments}
+event: tool_result  {call_id, name, content}
+event: error        {code, message}
+event: done         {conversation_id, message_id, run_id, finish_reason}
+```
+
+`token` 是**增量**，不是累计快照。流式失败时，已生成内容会以 `status="partial"` 落库，随后发送 `error`，不发送 `done`。
+
+### 新增 Agent
+
+1. 写一个 LangGraph 图并 `compile()`，放在 `app/agents/implementations/`。
+2. 在 `aegra.json` 的 `graphs` 中增加 `agent_id → 图路径`。
+3. 在 `app/agents/__init__.py` 注册 `AgentDefinition`。
+4. 重启服务；启动时会校验每个注册 Agent 都有对应的图。
 
 ## 测试
 
@@ -137,6 +182,6 @@ uv run ruff check app tests
 
 ## 下一步
 
-P2：Agent Registry、`POST /api/v1/agents/{id}/chat`、`/chat/stream`、会话与消息 API、多轮上下文、SSE 事件契约。
+P3：Workflow Registry、`/api/v1/workflows`、同步 / 异步执行、运行状态与结果持久化、取消与超时。
 
 更完整的背景与验收映射见 [`docs/requirements-analysis.md`](docs/requirements-analysis.md)。

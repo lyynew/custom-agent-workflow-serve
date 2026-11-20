@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import func, update
 
+from app.agents import agent_registry
 from app.api.errors import (
     APIError,
     api_error_handler,
@@ -49,6 +50,7 @@ async def _mark_interrupted_runs() -> None:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Fail fast on a missing migration or an unresolvable secret_ref.
     await application_store.warmup()
+    agent_registry.validate_config()
     await _mark_interrupted_runs()
 
     logger.info("AI service started with %d application(s)", len(application_store.cached_app_ids))

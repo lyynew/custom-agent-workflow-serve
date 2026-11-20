@@ -1,11 +1,6 @@
 """HTTP-level smoke tests with the auth dependency overridden."""
 
-import httpx
-import pytest
-from aegra_api.core.auth_deps import require_auth
 from aegra_api.models.auth import User
-
-from app.main import app
 
 
 def _user(app_id: str = "agriculture_app", user_id: str = "10001") -> User:
@@ -16,24 +11,6 @@ def _user(app_id: str = "agriculture_app", user_id: str = "10001") -> User:
         allowed_agents=["*"],
         allowed_workflows=["*"],
     )
-
-
-@pytest.fixture
-def asgi_client():
-    transport = httpx.ASGITransport(app=app)
-    return httpx.AsyncClient(transport=transport, base_url="http://test")
-
-
-@pytest.fixture
-def authenticated_as():
-    def _set(user: User):
-        async def _dependency() -> User:
-            return user
-
-        app.dependency_overrides[require_auth] = _dependency
-
-    yield _set
-    app.dependency_overrides.clear()
 
 
 async def test_whoami_returns_namespaced_identity(authenticated_as, asgi_client):
