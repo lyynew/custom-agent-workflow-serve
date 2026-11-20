@@ -85,6 +85,9 @@ class WorkflowRunOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    #: Last time a poller observed this run; a stale value on a `running` run
+    #: means its poller died (the next read reconciles it).
+    heartbeat_at: datetime | None = None
 
 
 class WorkflowRunList(BaseModel):

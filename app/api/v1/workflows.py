@@ -95,10 +95,12 @@ async def list_runs(
 async def get_run(
     run_id: UUID,
     context: AuthContext = Depends(get_auth_context),
+    credentials: RuntimeCredentials = Depends(get_runtime_credentials),
+    runtime: RuntimeAdapter = Depends(get_runtime_adapter),
     session: AsyncSession = Depends(get_session),
 ) -> WorkflowRunOut:
-    repository = WorkflowRunRepository(session, context)
-    run = await repository.require(run_id)
+    service = WorkflowService(session, context, credentials, runtime)
+    run = await service.refresh(run_id)
     return WorkflowRunOut.model_validate(run)
 
 
@@ -106,10 +108,12 @@ async def get_run(
 async def get_run_result(
     run_id: UUID,
     context: AuthContext = Depends(get_auth_context),
+    credentials: RuntimeCredentials = Depends(get_runtime_credentials),
+    runtime: RuntimeAdapter = Depends(get_runtime_adapter),
     session: AsyncSession = Depends(get_session),
 ) -> WorkflowResultOut:
-    repository = WorkflowRunRepository(session, context)
-    run = await repository.require(run_id)
+    service = WorkflowService(session, context, credentials, runtime)
+    run = await service.refresh(run_id)
 
     if run.status == "succeeded":
         return WorkflowResultOut(
@@ -172,7 +176,11 @@ async def execute_workflow(
     try:
         run = await service.start(workflow_id, normalised)
     except WorkflowCapacityReached as exc:
-        raise APIError(429, "too_many_runs", "Too many workflow runs in progress, retry later") from exc
+        raise APIError(
+            429,
+            "too_many_runs",
+            f"Too many workflow runs in progress for this {exc.scope} (limit {exc.limit}), retry later",
+        ) from exc
     except RuntimeCallError as exc:
         logger.warning("Workflow runtime call failed: %s", exc)
         raise APIError(502, "runtime_error", "Workflow runtime call failed") from exc

@@ -1,5 +1,6 @@
 """Business API errors with one response envelope."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import Request
@@ -10,10 +11,20 @@ from app.repositories.errors import ResourceNotFound
 
 
 class APIError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
+        # Only used for responses that must carry protocol headers (429 and
+        # friends); everything else stays in the JSON envelope.
+        self.headers = dict(headers or {})
         super().__init__(message)
 
 
@@ -26,6 +37,7 @@ async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content=_envelope(request, exc.code, exc.message),
+        headers=exc.headers or None,
     )
 
 

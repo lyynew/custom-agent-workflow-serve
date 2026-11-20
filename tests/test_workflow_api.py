@@ -149,12 +149,15 @@ async def test_result_of_unfinished_run_conflicts(
     seeded_apps, authenticated_as, asgi_client, fake_runtime, workflow_launcher
 ):
     authenticated_as(_user())
+    fake_runtime.workflow_statuses = ["running"]
     created = (await _execute(asgi_client)).json()
 
     response = await asgi_client.get(f"/api/v1/workflows/runs/{created['run_id']}/result")
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "run_not_finished"
+
+    workflow_launcher.close()
 
 
 async def test_failed_run_reports_the_runtime_error(
@@ -287,9 +290,8 @@ async def test_runtime_failure_returns_502(
     assert fake_runtime.deleted_threads == ["thread-1"]
 
 
-async def test_startup_reconciliation_interrupts_orphan_runs(seeded_apps, agri_context, session):
-    """A run in flight when the process died must not stay `running` forever."""
-    from app.main import _mark_interrupted_runs
+async def test_new_run_starts_with_a_fresh_lease(seeded_apps, agri_context, session):
+    """The lease is stamped at creation so no reaper can grab it before a poller does."""
     from app.repositories.workflow_runs import WorkflowRunRepository
 
     repository = WorkflowRunRepository(session, agri_context)
@@ -301,8 +303,67 @@ async def test_startup_reconciliation_interrupts_orphan_runs(seeded_apps, agri_c
     )
     await session.commit()
 
-    await _mark_interrupted_runs()
-    await session.refresh(run)
+    assert run.status == "pending"
+    assert run.heartbeat_at is not None
+    assert run.started_at is None
 
-    assert run.status == "interrupted"
-    assert run.finished_at is not None
+
+async def test_read_finalises_a_run_whose_poller_died(
+    seeded_apps, authenticated_as, asgi_client, fake_runtime, workflow_launcher
+):
+    """Any replica can serve the read: no cross-replica handover is needed."""
+    authenticated_as(_user())
+    created = (await _execute(asgi_client)).json()
+
+    # The poller never ran — as if its process had died right after the 202.
+    workflow_launcher.close()
+
+    detail = await asgi_client.get(f"/api/v1/workflows/runs/{created['run_id']}")
+
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "succeeded"
+    assert detail.json()["output"] == {"total": 5}
+
+
+async def test_read_times_out_a_run_nobody_watched(
+    seeded_apps, authenticated_as, asgi_client, fake_runtime, workflow_launcher, monkeypatch
+):
+    """The timeout guarantee must not depend on a poller being alive."""
+    monkeypatch.setattr(
+        workflow_service,
+        "get_settings",
+        lambda: _tuned_settings(workflow_run_timeout_seconds=0.0),
+    )
+    fake_runtime.workflow_statuses = ["running"]
+    authenticated_as(_user())
+    created = (await _execute(asgi_client)).json()
+    workflow_launcher.close()
+
+    detail = await asgi_client.get(f"/api/v1/workflows/runs/{created['run_id']}")
+
+    assert detail.json()["status"] == "timed_out"
+    assert detail.json()["error"]["code"] == "workflow_timeout"
+
+
+async def test_concurrency_limit_is_per_application(
+    seeded_apps, authenticated_as, asgi_client, fake_runtime, workflow_launcher, monkeypatch
+):
+    """One tenant hitting its limit must not block another tenant."""
+    monkeypatch.setattr(
+        workflow_service,
+        "get_settings",
+        lambda: _tuned_settings(workflow_max_concurrent_runs=1),
+    )
+
+    authenticated_as(_user())
+    agri_first = await _execute(asgi_client)
+    agri_second = await _execute(asgi_client)
+
+    authenticated_as(_user(app_id="management_app"))
+    mgmt_first = await _execute(asgi_client)
+
+    assert agri_first.status_code == 202
+    assert agri_second.status_code == 429
+    assert mgmt_first.status_code == 202
+
+    workflow_launcher.close()

@@ -31,6 +31,10 @@ class ApplicationConfig(BaseModel):
     allowed_agents: tuple[str, ...] = ()
     allowed_workflows: tuple[str, ...] = ()
     enabled: bool = True
+    #: NULL means unlimited.
+    rate_limit_per_minute: int | None = None
+    daily_request_quota: int | None = None
+    max_concurrent_workflow_runs: int | None = None
 
     @classmethod
     def from_row(cls, row: Application) -> "ApplicationConfig":
@@ -42,6 +46,9 @@ class ApplicationConfig(BaseModel):
             allowed_agents=tuple(row.allowed_agents or ()),
             allowed_workflows=tuple(row.allowed_workflows or ()),
             enabled=row.enabled,
+            rate_limit_per_minute=row.rate_limit_per_minute,
+            daily_request_quota=row.daily_request_quota,
+            max_concurrent_workflow_runs=row.max_concurrent_workflow_runs,
         )
 
 

@@ -9,7 +9,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import func, update
 
 from app.agents import agent_registry
 from app.api.errors import (
@@ -21,31 +20,13 @@ from app.api.errors import (
 from app.api.v1.router import router as v1_router
 from app.auth.errors import AuthError
 from app.auth.store import application_store
-from app.database.session import dispose_engine, get_session_factory
-from app.models.workflow_run import WorkflowRun
+from app.cache.redis import close_redis
+from app.database.session import dispose_engine
 from app.repositories.errors import ResourceNotFound
 from app.services.workflows import task_launcher
 from app.workflows import workflow_registry
 
 logger = logging.getLogger(__name__)
-
-
-async def _mark_interrupted_runs() -> None:
-    """No Redis in v1: an in-flight run cannot survive a process restart.
-
-    Marking it explicitly is better than leaving it `running` forever. This is
-    safe for the single-instance deployment documented in ADR 0001.
-    """
-    async with get_session_factory()() as session:
-        result = await session.execute(
-            update(WorkflowRun)
-            .where(WorkflowRun.status.in_(("pending", "running")))
-            .values(status="interrupted", finished_at=func.now())
-        )
-        await session.commit()
-
-    if result.rowcount:
-        logger.warning("Marked %d in-flight workflow run(s) as interrupted", result.rowcount)
 
 
 @asynccontextmanager
@@ -54,15 +35,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await application_store.warmup()
     agent_registry.validate_config()
     workflow_registry.validate_config()
-    await _mark_interrupted_runs()
+
+    # No blanket "mark everything interrupted" on startup: with more than one
+    # replica that would kill runs owned by other processes. A run whose poller
+    # died is finalised by read-time reconciliation instead (see WorkflowService).
 
     logger.info("AI service started with %d application(s)", len(application_store.cached_app_ids))
     try:
         yield
     finally:
-        # Stop background workflow pollers before the pool goes away, so they
-        # can record `interrupted` instead of failing on a closed engine.
+        # Stop background pollers before the pool goes away.
         await task_launcher.shutdown()
+        await close_redis()
         await dispose_engine()
 
 

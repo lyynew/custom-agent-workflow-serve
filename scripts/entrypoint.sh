@@ -16,7 +16,19 @@ if [ -n "${SEED_APPLICATIONS_FILE:-}" ]; then
     fi
     echo "[entrypoint] upserting applications from ${SEED_APPLICATIONS_FILE}"
     python -m app.cli seed-apps --file "${SEED_APPLICATIONS_FILE}"
-    # Fails fast when a secret_ref cannot be resolved.
+fi
+
+if [ -n "${SEED_MODELS_FILE:-}" ]; then
+    if [ ! -f "${SEED_MODELS_FILE}" ]; then
+        echo "[entrypoint] SEED_MODELS_FILE not found: ${SEED_MODELS_FILE}" >&2
+        exit 1
+    fi
+    echo "[entrypoint] upserting model configs from ${SEED_MODELS_FILE}"
+    python -m app.cli seed-models --file "${SEED_MODELS_FILE}"
+fi
+
+if [ -n "${SEED_APPLICATIONS_FILE:-}${SEED_MODELS_FILE:-}" ]; then
+    # Fails fast when a secret_ref or model key reference cannot be resolved.
     python -m app.cli validate
 fi
 

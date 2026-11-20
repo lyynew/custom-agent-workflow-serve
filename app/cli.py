@@ -1,4 +1,4 @@
-"""Small administrative CLI: seed and inspect application registrations."""
+"""Small administrative CLI: seed and inspect applications and model configs."""
 
 import argparse
 import asyncio
@@ -7,9 +7,11 @@ import sys
 from pathlib import Path
 
 from app.auth.jwt import JwtConfig, resolve_key
+from app.auth.secrets import resolve_secret
 from app.auth.store import ApplicationConfig
 from app.database.session import dispose_engine, get_session_factory
 from app.repositories.applications import ApplicationRepository
+from app.repositories.model_configs import ModelConfigRepository
 
 
 def _load_configs(path: Path) -> list[ApplicationConfig]:
@@ -28,6 +30,9 @@ def _load_configs(path: Path) -> list[ApplicationConfig]:
                 allowed_agents=tuple(item.get("allowed_agents", ())),
                 allowed_workflows=tuple(item.get("allowed_workflows", ())),
                 enabled=bool(item.get("enabled", True)),
+                rate_limit_per_minute=item.get("rate_limit_per_minute"),
+                daily_request_quota=item.get("daily_request_quota"),
+                max_concurrent_workflow_runs=item.get("max_concurrent_workflow_runs"),
             )
         )
     return configs
@@ -62,6 +67,48 @@ async def _list() -> None:
                     "key_ref": row.jwt_config.get("secret_ref") or row.jwt_config.get("public_key_ref"),
                     "allowed_agents": row.allowed_agents,
                     "allowed_workflows": row.allowed_workflows,
+                    "rate_limit_per_minute": row.rate_limit_per_minute,
+                    "daily_request_quota": row.daily_request_quota,
+                    "max_concurrent_workflow_runs": row.max_concurrent_workflow_runs,
+                }
+                for row in rows
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+async def _seed_models(path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("Seed file must contain a JSON array")
+
+    async with get_session_factory()() as session:
+        repository = ModelConfigRepository(session)
+        for item in payload:
+            await repository.upsert(item)
+        await session.commit()
+
+    for item in payload:
+        print(f"seeded model {item['name']} ({item['provider']}/{item['model_name']})")
+
+
+async def _list_models() -> None:
+    async with get_session_factory()() as session:
+        rows = await ModelConfigRepository(session).list_all()
+
+    print(
+        json.dumps(
+            [
+                {
+                    "name": row.name,
+                    "provider": row.provider,
+                    "model_name": row.model_name,
+                    "base_url": row.base_url,
+                    # A reference, never a secret.
+                    "key_ref": row.api_key_encrypted,
+                    "enabled": row.enabled,
                 }
                 for row in rows
             ],
@@ -74,6 +121,7 @@ async def _list() -> None:
 async def _validate() -> None:
     async with get_session_factory()() as session:
         rows = await ApplicationRepository(session).list_all()
+        models = await ModelConfigRepository(session).list_all()
 
     failures = 0
     for row in rows:
@@ -86,6 +134,17 @@ async def _validate() -> None:
         else:
             print(f"OK   {config.app_id}")
 
+    for model in models:
+        if not model.enabled or not model.api_key_encrypted:
+            continue
+        try:
+            resolve_secret(model.api_key_encrypted)
+        except Exception as exc:  # noqa: BLE001 - report every broken model config
+            failures += 1
+            print(f"FAIL model {model.name}: {exc}", file=sys.stderr)
+        else:
+            print(f"OK   model {model.name}")
+
     if failures:
         raise SystemExit(1)
 
@@ -96,6 +155,10 @@ async def _run(args: argparse.Namespace) -> None:
             await _seed(_load_configs(Path(args.file)))
         elif args.command == "list-apps":
             await _list()
+        elif args.command == "seed-models":
+            await _seed_models(Path(args.file))
+        elif args.command == "list-models":
+            await _list_models()
         elif args.command == "validate":
             await _validate()
     finally:
@@ -110,7 +173,13 @@ def main() -> None:
     seed.add_argument("--file", default="seed/applications.json")
 
     subparsers.add_parser("list-apps", help="List registered applications (no secrets)")
-    subparsers.add_parser("validate", help="Validate every secret_ref and key configuration")
+
+    seed_models = subparsers.add_parser("seed-models", help="Insert or update model configs from a JSON file")
+    seed_models.add_argument("--file", default="seed/models.json")
+
+    subparsers.add_parser("list-models", help="List model configs (key references only)")
+
+    subparsers.add_parser("validate", help="Validate every secret_ref, key reference and model config")
 
     asyncio.run(_run(parser.parse_args()))
 

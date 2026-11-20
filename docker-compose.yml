@@ -1,12 +1,41 @@
 name: ai-service
 
-# Single-instance deployment for a 4C/4G host (see docs/adr/0001-runtime-choice.md).
+# 4C/4G reference deployment (see docs/adr/0001-runtime-choice.md).
 #
-# Do NOT scale `ai-service` beyond one replica: background workflow pollers live
-# in-process and there is no shared queue (Redis is disabled on purpose), so a
-# second replica would neither see nor finish the first one's runs.
+# Single replica by default. To run more than one:
+#   1. drop the `ports:` mapping below (two replicas cannot bind one host port),
+#   2. put a reverse proxy in front and point it at the service name,
+#   3. `docker compose up -d --scale ai-service=2`.
+# Redis is already enabled, so any replica can serve any thread, stream, run and
+# quota counter. See docs/adr/0002-multi-replica.md.
 
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # noeviction is deliberate: an evicted key can be a queued run or a quota
+    # counter, and losing either is worse than refusing writes.
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -48,20 +77,27 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       # Inside the network the database is reachable by service name; the values
       # in `.env` describe the host-side setup and must not leak into the container.
       DATABASE_URL: postgresql://${POSTGRES_USER:-aegra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_service}
+      # Shared task queue + SSE pubsub + quota counters.
+      REDIS_BROKER_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
       # The runtime adapter calls this same process over loopback.
       SELF_URL: http://127.0.0.1:2026
       HOST: 0.0.0.0
       PORT: "2026"
-      # Optional: upsert demo applications on boot (idempotent). Clear it in production.
+      # Optional: upsert demo applications / model configs on boot (idempotent).
       SEED_APPLICATIONS_FILE: ${SEED_APPLICATIONS_FILE:-}
+      SEED_MODELS_FILE: ${SEED_MODELS_FILE:-}
     # Bound to loopback on purpose: /threads, /runs and /assistants must be
     # shielded by a reverse proxy, only /api/v1 is meant to face the internet.
+    # Remove this mapping before scaling to more than one replica.
     ports:
       - "127.0.0.1:${HOST_PORT:-2026}:2026"
     healthcheck:

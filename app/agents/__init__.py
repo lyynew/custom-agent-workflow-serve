@@ -19,4 +19,13 @@ agent_registry.register(
     )
 )
 
+agent_registry.register(
+    AgentDefinition(
+        agent_id="llm_agent",
+        name="LLM Agent",
+        description="Model-backed agent; the provider comes from biz.model_configs.",
+        tags=("llm",),
+    )
+)
+
 __all__ = ["AgentDefinition", "agent_registry"]

@@ -27,6 +27,9 @@
     },
     "allowed_agents": ["*"],
     "allowed_workflows": ["*"],
+    "rate_limit_per_minute": 60,
+    "daily_request_quota": 100000,
+    "max_concurrent_workflow_runs": 4,
     "enabled": true
   }
 ]

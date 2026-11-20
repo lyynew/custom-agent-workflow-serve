@@ -34,6 +34,9 @@ class ApplicationRepository:
         row.allowed_agents = list(config.allowed_agents)
         row.allowed_workflows = list(config.allowed_workflows)
         row.enabled = config.enabled
+        row.rate_limit_per_minute = config.rate_limit_per_minute
+        row.daily_request_quota = config.daily_request_quota
+        row.max_concurrent_workflow_runs = config.max_concurrent_workflow_runs
 
         await self._session.flush()
         return row

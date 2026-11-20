@@ -82,8 +82,11 @@ docker compose up -d --build  # 部署验证（见文末「部署验证记录」
 ### 9. 支持 PostgreSQL 持久化和服务重启恢复
 
 - `tests/test_migrations.py` — 业务表在 `biz` schema，使用 `biz.biz_alembic_version`，未污染 `public.alembic_version`
-- `tests/test_workflow_api.py::test_startup_reconciliation_interrupts_orphan_runs` — 启动把 `pending`/`running` 标为 `interrupted`
-- 实测（容器）：埋一条 `running` 的 run → `docker compose restart ai-service` → 该 run 变为 `interrupted` 且 `finished_at` 有值，日志 `Marked 1 in-flight workflow run(s) as interrupted`；会话与消息仍可读
+- `tests/test_workflow_api.py::test_read_finalises_a_run_whose_poller_died` — 轮询者死掉后，下一次读状态即完成对账
+- `tests/test_workflow_api.py::test_read_times_out_a_run_nobody_watched` — 没有人读也不会永远 `running`：超时由读时对账兜底
+- 实测（容器）：`docker compose restart ai-service` 后会话与消息仍可读；此前记录的 `running` run 在第一次读时收敛到真实状态
+
+> 变化：P5 之后启动时**不再**批量把未完成的 run 标成 `interrupted`（多副本下那会杀掉别的副本正在跑的 run），改由读时对账收敛。
 
 ### 10. 可以通过 Docker Compose 独立部署
 
@@ -108,14 +111,39 @@ docker compose up -d --build  # 部署验证（见文末「部署验证记录」
 | 恢复 | 恢复到临时库 `restore_check` | `applications=2`、`conversations=1`、`messages=2`、`workflow_runs=1`、`thread=2`、`run=2` |
 | 重启恢复 | `docker compose restart ai-service` | 恢复 healthy；孤儿 run 变 `interrupted`；历史数据仍可读 |
 
+## P5 增补验证
+
+三项能力在 P4 之后追加，属于说明书「多应用接入 / 权限控制 / 模型管理」的进一步落地。
+
+### Redis 与多副本
+
+- 开关即 Aegra 的 `REDIS_BROKER_ENABLED` + `REDIS_URL`，一个开关同时作用于任务队列、SSE pubsub 和本项目限流计数。
+- compose 增加 `redis:7-alpine`（`--maxmemory-policy noeviction`、限 256m）。
+- 实测：容器日志出现 Redis 队列与 pubsub 就绪；双副本场景下的工作流 run 由读时对账收敛（`test_read_finalises_a_run_whose_poller_died`）。
+
+### 应用维度限流与配额
+
+- `tests/test_rate_limit.py`（6 例）— 无限制不受影响、每分钟限流、每日配额、计数按应用隔离、Redis 缺失时内存兜底、限流作用于业务路由而非仅系统路由
+- `tests/test_workflow_api.py::test_concurrency_limit_is_per_application` — A 应用跑满不影响 B 应用
+- 实测：把某应用限到 3 次/分钟后，前 3 次 200、第 4 次 429，返回 `Retry-After: 24` 与 `X-RateLimit-Limit: 3`；另一应用不受影响
+
+### 模型配置接入调用链
+
+- `tests/test_models.py`（11 例）— echo/openai 两种 provider、缺失/禁用/不支持的配置报错、密钥引用无法解析时报错、缓存与刷新、`llm_agent` 使用配置模型、配置错误不被吞掉
+- 实测：`llm_agent` 经 `biz.model_configs` 的 `demo` 配置回答（多轮上下文正常），换配置行即可换模型，无需改代码
+
 ## 已知限制
 
 这些是**有意的取舍**，不是缺陷遗漏；每条都写明了触发条件和影响面。
 
-1. **没有 Redis，不能多副本。** 后台工作流轮询在进程内，进程崩溃会丢失进行中的 run（checkpoint 不受影响，重启时统一标 `interrupted`）。因此 `docker-compose.yml` 固定单副本，不要 `--scale`。
-2. **后台轮询沿用调用方 Token。** `WORKFLOW_RUN_TIMEOUT_SECONDS`（默认 600s）必须明显小于 Token 有效期，否则长任务会在轮询阶段 401。
-3. **客户端断流会取消运行。** 运行时默认 `on_disconnect=cancel`，已生成内容以 `status="partial"` 落库；`detach=true`（断流后继续跑）未实现。
-4. **401 的响应体是 Aegra 的 Agent Protocol 信封**（`{"error":"unauthorized","message":...,"details":null}`），其余错误（403/404/409/422/429/502/504）用本项目的统一信封 `{"error":{"code","message","request_id"}}`。401 由 Aegra 的认证依赖在进入业务路由前产生，无法用异常处理器改写。集成方应以 HTTP 状态码为判断依据。
-5. **并发上限是软限制。** `WORKFLOW_MAX_CONCURRENT_RUNS` 通过统计活跃 run 数实现，同时到达的请求可能同时越过检查。
-6. **没有附带反向代理配置。** 部署时必须由 nginx 等屏蔽 `/threads`、`/runs`、`/assistants`、`/store`、`/crons`，只暴露 `/api/v1`；compose 已把端口绑定在 `127.0.0.1` 作为兜底。
-7. **会话删除只对业务侧软删并尽力删除运行时 thread**，失败只记日志；残留 thread 由 Aegra 的 `POST /threads/prune` 清理。
+1. **没人读的工作流 run 会停在 `running`。** 终态由「谁读谁对账」收敛，所以客户端必须轮询（异步模式本来就是这个契约）。`heartbeat_at` 陈旧 + `running` 就是「暂时没人看」的信号。
+2. **后台轮询与读时对账都用调用方 Token。** `WORKFLOW_RUN_TIMEOUT_SECONDS`（默认 600s）必须明显小于 Token 有效期，否则对账阶段会 401。
+3. **没有跨租户的服务级凭证。** 这是刻意的：宁可让 run 靠读时对账收敛，也不保存用户 Token 或发放万能凭证（见 `docs/adr/0002-multi-replica.md`）。
+4. **客户端断流会取消运行。** 运行时默认 `on_disconnect=cancel`，已生成内容以 `status="partial"` 落库；`detach=true`（断流后继续跑）未实现。
+5. **401 的响应体是 Aegra 的 Agent Protocol 信封**（`{"error":"unauthorized","message":...,"details":null}`），其余错误（403/404/409/422/429/502/504）用本项目的统一信封 `{"error":{"code","message","request_id"}}`。401 由 Aegra 的认证依赖在进入业务路由前产生，无法用异常处理器改写。集成方应以 HTTP 状态码为判断依据。
+6. **限流用固定窗口。** 跨窗口边界的突发可以到 `2 × limit`；要实现平滑限流需要换令牌桶。
+7. **Redis 不可用时：** 队列与 SSE 广播不可用（`/health` 会不健康、Aegra 无法接收新 run）；限流计数降级为进程内计数，多副本下实际阈值放宽为 `limit × 副本数`。
+8. **并发上限是软限制。** 按应用统计活跃 run 数，同时到达的请求可能同时越过检查；`WORKFLOW_INSTANCE_MAX_RUNS` 是进程级硬上限，但仍是先查后写。
+9. **模型配置变更最长 60s 生效**（`MODEL_CONFIG_CACHE_TTL_SECONDS`）。需要立即生效时调用 `model_resolver.clear()`（目前只能靠重启）。
+10. **没有附带反向代理配置。** 部署时必须由 nginx 等屏蔽 `/threads`、`/runs`、`/assistants`、`/store`、`/crons`，只暴露 `/api/v1`；compose 已把端口绑定在 `127.0.0.1` 作为兜底。
+11. **会话删除只对业务侧软删并尽力删除运行时 thread**，失败只记日志；残留 thread 由 Aegra 的 `POST /threads/prune` 清理。

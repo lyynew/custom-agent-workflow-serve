@@ -72,6 +72,11 @@ async def authenticate(headers: dict[str, Any]) -> dict[str, Any]:
         "user_id": user_id,
         "allowed_agents": list(record.allowed_agents),
         "allowed_workflows": list(record.allowed_workflows),
+        # Carried on the authenticated principal so quota checks need no extra
+        # database round-trip per request.
+        "rate_limit_per_minute": record.rate_limit_per_minute,
+        "daily_request_quota": record.daily_request_quota,
+        "max_concurrent_workflow_runs": record.max_concurrent_workflow_runs,
     }
 
 

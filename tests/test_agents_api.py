@@ -21,7 +21,11 @@ async def test_wildcard_lists_registered_agents(
     response = await asgi_client.get("/api/v1/agents")
 
     assert response.status_code == 200
-    assert [agent["agent_id"] for agent in response.json()] == ["echo_agent", "reverse_agent"]
+    assert [agent["agent_id"] for agent in response.json()] == [
+        "echo_agent",
+        "llm_agent",
+        "reverse_agent",
+    ]
 
 
 async def test_empty_allow_list_lists_nothing(

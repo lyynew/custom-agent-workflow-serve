@@ -1,0 +1,23 @@
+[
+  {
+    "name": "demo",
+    "provider": "echo",
+    "model_name": "echo-1",
+    "temperature": 0.0,
+    "timeout_seconds": 30,
+    "extra": { "prefix": "model" },
+    "enabled": true
+  },
+  {
+    "name": "openai-compatible",
+    "provider": "openai",
+    "base_url": "https://api.openai.com/v1",
+    "model_name": "gpt-4o-mini",
+    "api_key_encrypted": "env:OPENAI_API_KEY",
+    "temperature": 0.7,
+    "max_tokens": 1024,
+    "timeout_seconds": 60,
+    "extra": {},
+    "enabled": false
+  }
+]

@@ -13,6 +13,7 @@
 | P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件 |
 | P3 Workflow | 完成 | Workflow Registry、同步 / 异步执行、run 状态与结果、取消与超时 |
 | P4 交付 | 完成 | Docker Compose、健康检查、备份脚本、断流保留、验收对照（[docs/acceptance.md](docs/acceptance.md)） |
+| P5 多副本与配额 | 完成 | Redis broker、工作流读时对账、应用维度限流 / 配额 / 并发、`model_configs` 接入调用链 |
 
 ## 架构
 
@@ -27,12 +28,12 @@ Aegra 进程（FastAPI）
    ├─ /threads      Agent Protocol（反代层对外屏蔽）
    └─ LangGraph     图执行 + checkpoint
         │
-   PostgreSQL
-   ├─ public        Aegra 自己的表与 alembic_version
+   PostgreSQL          Redis（可选，多副本必开）
+   ├─ public        Aegra 自己的表与 alembic_version     队列 / SSE pubsub / 限流计数
    └─ biz           业务表与 biz_alembic_version
 ```
 
-v1 单实例默认 **不启用 Redis**（`REDIS_BROKER_ENABLED=false`）。代价是进程崩溃会丢失进行中的 run；checkpoint 不受影响，启动时会把未完成的 `workflow_runs` 标记为 `interrupted`。
+单实例可不启用 Redis（`REDIS_BROKER_ENABLED=false`），此时队列、SSE 广播和限流计数都在进程内。开启后任意副本都能服务任意 thread / run；工作流 run 即使轮询者挂掉，也会在下一次读状态时对账收敛，见 [`docs/adr/0002-multi-replica.md`](docs/adr/0002-multi-replica.md)。
 
 ## 目录
 
@@ -43,9 +44,10 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
-├── agents/                 Agent Registry 与示例 Agent（echo_agent / reverse_agent）
+├── agents/                 Agent Registry 与示例 Agent（echo / reverse / llm）
 ├── workflows/              Workflow Registry 与示例 Workflow（sum / text_stats）
-├── services/               会话编排、消息持久化、Workflow 执行编排
+├── services/               会话编排、消息持久化、Workflow 执行编排、模型解析、限流
+├── cache/                  Redis 客户端（不可用时自动降级）
 ├── models/                 SQLAlchemy 模型（biz schema）
 ├── repositories/           强制按 (app_id, user_id) 过滤的仓储
 ├── database/               异步引擎与会话
@@ -118,14 +120,32 @@ docker compose ps        # ai-service 变为 healthy 即可用
 curl -s http://127.0.0.1:2026/health
 ```
 
-首次启动顺序：Postgres healthy → `alembic upgrade head`（`biz`）→ 按需 upsert 应用 → Aegra 迁移（`public`）→ 监听端口。两套迁移都幂等，重启安全。
+首次启动顺序：Postgres healthy → `alembic upgrade head`（`biz`）→ 按需 upsert 应用与模型配置 → Aegra 迁移（`public`）→ 监听端口。两套迁移都幂等，重启安全。
 
 资源与安全边界：
 
 - 端口只绑定 `127.0.0.1`。`/threads`、`/runs`、`/assistants`、`/store`、`/crons` 是运行时内部接口，**必须**由反代屏蔽，只对外暴露 `/api/v1`。
-- `ai-service` 限 2G、`postgres` 限 1G，日志 json-file 10m × 3。
-- 固定单副本。后台工作流轮询在进程内且没有共享队列，`--scale` 会让其他副本看不到这些 run。
-- `stop_grace_period: 30s` 留出时间把进行中的 run 标为 `interrupted`。
+- `ai-service` 限 2G、`postgres` 限 1G、`redis` 限 256m，日志 json-file 10m × 3。
+- `redis` 用 `--maxmemory-policy noeviction`：队列键被淘汰等于丢任务，宁可写入失败。
+- `stop_grace_period: 30s` 给关闭流程留出时间。
+
+### 扩到多副本
+
+默认单副本。要跑多个：
+
+```bash
+# 1. 去掉 ai-service 的 ports 映射（两个副本不能绑同一个宿主端口）
+# 2. 用反代指向服务名 ai-service:2026，只转发 /api/v1
+docker compose up -d --scale ai-service=2
+```
+
+Redis 已在 compose 中开启，`REDIS_BROKER_ENABLED=true`，因此任意副本都能：创建/续读任意 thread、以 SSE 跟随任意 run、共享限流计数。工作流的 run 不依赖「起它的那个副本」活着——状态与结果读接口会用调用方凭证即时对账。
+
+多副本下有三点要知道：
+
+1. `running` 且 `heartbeat_at` 陈旧，说明轮询者已死；下一次读状态会自动收敛（成功、失败或超时）。
+2. 没人读的 run 会一直停在 `running` 直到被读或被取消——异步工作流的客户端本来就要轮询。
+3. Redis 挂掉时，Aegra 的队列不可用（服务会不健康）；限流计数则自动降级为进程内计数，不会阻断业务。
 
 备份与恢复：
 
@@ -156,6 +176,24 @@ X-App-Id: <app_id>
 - 越权统一返回 404，不区分「不存在」与「不属于你」。
 - `allowed_agents` / `allowed_workflows`：`["*"]` 全允许，`[]` 全禁止。
 - 业务错误统一为 `{"error": {"code", "message", "request_id"}}`；唯一例外是 401，它由 Aegra 的认证依赖在进入业务路由前产生，使用 Aegra 自己的信封。集成方请以 HTTP 状态码判断。
+
+## 配额与限流
+
+每个应用可单独设置，`NULL` 表示不限制：
+
+| 字段 | 含义 |
+|---|---|
+| `rate_limit_per_minute` | 每分钟业务请求数 |
+| `daily_request_quota` | 每日业务请求数 |
+| `max_concurrent_workflow_runs` | 同时进行中的工作流 run 数，留空则用 `WORKFLOW_MAX_CONCURRENT_RUNS` |
+
+超限返回 `429`，带 `Retry-After`、`X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`；`error.code` 为 `rate_limited` 或 `daily_quota_exceeded`。计数是 Redis 固定窗口；Redis 不可用时降级为进程内计数，不会阻断业务（多副本下实际阈值放宽为 `limit × 副本数`）。
+
+另有一道进程级硬上限 `WORKFLOW_INSTANCE_MAX_RUNS`，避免多租户叠加把机器打满。
+
+```bash
+uv run python -m app.cli seed-apps --file seed/applications.example.json   # 含配额示例
+```
 
 ## 接口
 
@@ -238,6 +276,26 @@ curl -s -X POST http://127.0.0.1:2026/api/v1/workflows/sum_workflow/execute \
 3. 在 `app/agents/__init__.py` 注册 `AgentDefinition`。
 4. 重启服务；启动时会校验每个注册 Agent 都有对应的图。
 
+## 模型配置
+
+Agent 不写死模型。`llm_agent` 在调用时按名字从 `biz.model_configs` 取配置并构建 LangChain 客户端，`DEFAULT_MODEL_CONFIG`（默认 `demo`）决定用哪一条。
+
+| 字段 | 说明 |
+|---|---|
+| `name` | 配置名，Agent 按它引用 |
+| `provider` | `openai`（任何 OpenAI 兼容接口，含自建网关）或 `echo`（离线确定性，供本地与测试） |
+| `base_url` | 兼容网关地址，留空用官方地址 |
+| `model_name` | 模型名 |
+| `api_key_encrypted` | **只存引用**，如 `env:OPENAI_API_KEY`，绝不存明文 |
+| `temperature` / `max_tokens` / `timeout_seconds` | 调用参数 |
+
+```bash
+uv run python -m app.cli seed-models --file seed/models.example.json
+uv run python -m app.cli list-models     # 只输出 key 引用，不输出密钥
+```
+
+换供应商、换模型、调温度都是改配置行，不改代码；`MODEL_CONFIG_CACHE_TTL_SECONDS`（默认 60s）后生效。配置缺失或被禁用时，Agent 直接报错而不是静默降级。
+
 ## 测试
 
 ```bash
@@ -259,16 +317,18 @@ uv run ruff check app tests
 5. 对外只暴露 `/api/v1`；部署时由反代屏蔽 `/threads`、`/runs`、`/assistants`、`/store`、`/crons`。
 6. 依赖固定版本，`uv.lock` 随仓库提交。
 7. `workflow_runs` 是运行时 run 的业务视图：对外只出现业务 UUID，运行时的 `run_id` / `thread_id` 仅内部留存；状态变更用条件更新，避免后台轮询覆盖取消结果。
+8. 没有任何跨租户的服务级凭证。需要读他人 run 的地方（多副本接管）一律改为「用调用方自己的凭证读时对账」。
+9. 限流、配额、Redis 都属于**保护性设施**，自身故障时必须降级而不是拒绝全部业务流量。
 
 ## 下一步
 
-验收对照、部署验证记录与已知限制见 [`docs/acceptance.md`](docs/acceptance.md)。
+验收对照、部署验证记录与已知限制见 [`docs/acceptance.md`](docs/acceptance.md)，多副本决策见 [`docs/adr/0002-multi-replica.md`](docs/adr/0002-multi-replica.md)。
 
-若要继续演进，优先级建议：
+仍然开放的方向：
 
-1. 引入 Redis（`REDIS_BROKER_ENABLED=true`）以支持多副本与进程崩溃后不丢 run；
-2. 给 `detach=true` 支持断流后继续执行；
-3. 模型配置（`biz.model_configs`）接入实际调用链；
-4. 按应用维度的限流与配额。
+1. `detach=true`：断流后继续执行（当前断流即取消，已生成内容落 `partial`）；
+2. 限流改为令牌桶，避免固定窗口在边界处的突发；
+3. 模型调用的用量与成本统计（token 计数落到 `workflow_runs` / 消息表）；
+4. 把 `applications` 的配额变更做成带审计的管理接口，不再只能改库。
 
 更完整的背景与验收映射见 [`docs/requirements-analysis.md`](docs/requirements-analysis.md)。

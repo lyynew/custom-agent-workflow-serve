@@ -9,7 +9,7 @@ Two rules are encoded here rather than in the service:
 """
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -44,6 +44,10 @@ class WorkflowRunRepository(ScopedRepository[WorkflowRun]):
             thread_id=thread_id,
             status="pending",
             input=input,
+            # Fresh lease: a poller is expected to pick this up immediately.
+            # Set in Python (not `now()`) so the value is readable right away
+            # without a second round-trip.
+            heartbeat_at=datetime.now(UTC),
         )
         self.session.add(run)
         await self.session.flush()
@@ -84,6 +88,18 @@ class WorkflowRunRepository(ScopedRepository[WorkflowRun]):
         )
         return int((await self.session.scalar(statement)) or 0)
 
+    async def count_active_for_app(self) -> int:
+        """Unfinished runs owned by the current application (all its users)."""
+        statement = (
+            select(func.count())
+            .select_from(WorkflowRun)
+            .where(
+                WorkflowRun.app_id == self.context.app_id,
+                WorkflowRun.status.in_(ACTIVE_STATUSES),
+            )
+        )
+        return int((await self.session.scalar(statement)) or 0)
+
     async def mark_running(self, run_id: UUID | str) -> bool:
         statement = (
             update(WorkflowRun)
@@ -93,7 +109,21 @@ class WorkflowRunRepository(ScopedRepository[WorkflowRun]):
                 WorkflowRun.user_id == self.context.user_id,
                 WorkflowRun.status == "pending",
             )
-            .values(status="running", started_at=func.now())
+            .values(status="running", started_at=func.now(), heartbeat_at=func.now())
+        )
+        return (await self.session.execute(statement)).rowcount > 0
+
+    async def heartbeat(self, run_id: UUID | str) -> bool:
+        """Extend the lease. False means the run is no longer ours to poll."""
+        statement = (
+            update(WorkflowRun)
+            .where(
+                WorkflowRun.id == run_id,
+                WorkflowRun.app_id == self.context.app_id,
+                WorkflowRun.user_id == self.context.user_id,
+                WorkflowRun.status == "running",
+            )
+            .values(heartbeat_at=func.now())
         )
         return (await self.session.execute(statement)).rowcount > 0
 

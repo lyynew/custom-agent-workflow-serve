@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     self_url: str = "http://127.0.0.1:2026"
 
+    # Shared broker. Aegra reads the same two variables, so one switch turns on
+    # the queue + SSE pubsub and our own counters together.
+    redis_broker_enabled: bool = False
+    redis_url: str = "redis://127.0.0.1:6379/0"
+
     auth_cache_ttl_seconds: int = Field(default=60, ge=0)
     jwt_default_leeway_seconds: int = Field(default=30, ge=0)
 
@@ -41,7 +46,19 @@ class Settings(BaseSettings):
     workflow_sync_timeout_seconds: float = Field(default=30.0, gt=0)
     workflow_run_timeout_seconds: float = Field(default=600.0, gt=0)
     workflow_poll_interval_seconds: float = Field(default=0.3, gt=0)
+    #: Per-application default; `applications.max_concurrent_workflow_runs` overrides it.
     workflow_max_concurrent_runs: int = Field(default=8, ge=1)
+    #: Hard ceiling for one process/instance, regardless of tenant count.
+    workflow_instance_max_runs: int = Field(default=32, ge=1)
+    #: Lease takes over a run only after this much silence.
+    workflow_lease_seconds: float = Field(default=45.0, gt=0)
+    workflow_heartbeat_seconds: float = Field(default=10.0, gt=0)
+    workflow_reaper_interval_seconds: float = Field(default=15.0, gt=0)
+
+    # Model configuration. Keys are never stored: `api_key_encrypted` holds an
+    # `env:VARIABLE` reference, resolved at call time.
+    model_config_cache_ttl_seconds: int = Field(default=60, ge=0)
+    default_model_config: str = "demo"
 
     @field_validator("database_url")
     @classmethod

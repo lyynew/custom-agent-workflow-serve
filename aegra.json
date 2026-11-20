@@ -10,6 +10,10 @@
       "path": "./app/agents/implementations/reverse_agent.py:graph",
       "description": "Deterministic demo agent that reverses user text"
     },
+    "llm_agent": {
+      "path": "./app/agents/implementations/llm_agent.py:graph",
+      "description": "Model-backed agent driven by biz.model_configs"
+    },
     "sum_workflow": {
       "path": "./app/workflows/implementations/sum_workflow.py:graph",
       "description": "Minimal workflow: adds two integers"

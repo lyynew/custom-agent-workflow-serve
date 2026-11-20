@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import Boolean, Text, text
+from sqlalchemy import Boolean, Integer, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,3 +39,9 @@ class Application(Base, TimestampMixin):
         default=True,
         server_default=text("true"),
     )
+
+    # Quotas. NULL means unlimited, so an application that never sets them
+    # behaves exactly as before.
+    rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_request_quota: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_concurrent_workflow_runs: Mapped[int | None] = mapped_column(Integer, nullable=True)
