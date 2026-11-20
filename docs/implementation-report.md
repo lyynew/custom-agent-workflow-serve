@@ -3,10 +3,10 @@
 | 项目   | 内容                                                               |
 | ---- | ---------------------------------------------------------------- |
 | 仓库   | `git@github.com:lyynew/custom-agent-workflow-serve.git`          |
-| 当前提交 | `8345eeb`（feat(agent): 新增编排型参考 Agent）                            |
+| 当前提交 | `4b053b4`（feat(agent): create_agent 版 Agent 与按 Agent 的模型路由） |
 | 报告日期 | 2026-11-20                                                       |
-| 覆盖范围 | P0 选型验证 → P5 多副本/配额/模型 → 编排型参考 Agent                             |
-| 代码规模 | 应用约 4.8k 行（65 个 .py）、测试约 2.6k 行（22 个文件）、迁移 327 行                 |
+| 覆盖范围 | P0 选型验证 → P5 多副本/配额/模型 → 编排型 Agent 与 create_agent 版 |
+| 代码规模 | 应用 4.9k 行（67 个 .py）、测试 2.7k 行（23 个文件）、迁移 327 行 |
 | 质量状态 | `pytest` 136 passed；`ruff check` 全过；`docker compose config` 校验通过 |
 
 
