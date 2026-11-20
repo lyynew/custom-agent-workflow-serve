@@ -245,7 +245,7 @@ event: done         {conversation_id, message_id, run_id, finish_reason}
 - `mode=sync`：在请求内等待，默认上限 30s（`WORKFLOW_SYNC_TIMEOUT_SECONDS`）。超时会取消运行并返回 `504 workflow_timeout`，长任务请用异步模式。
 - `input` 按 Workflow 自身的 Pydantic 模型校验，未知字段直接 `422 invalid_input`，不会创建 thread 或执行记录。
 
-运行状态：`pending → running → succeeded | failed | timed_out | cancelled`。进程重启时，未完成的 `pending` / `running` 会被标记为 `interrupted`。
+运行状态：`pending → running → succeeded | failed | timed_out | cancelled`。进程重启不会批量改状态（多副本下那会杀掉别人的 run）：未完成的 run 在下次被读到时时，由**读时对账**收敛到运行时的真实状态。
 
 结果接口只对 `succeeded` 返回 200；其余终态返回 `409`，`error.code` 分别是 `workflow_failed` / `workflow_timeout` / `workflow_cancelled`，未结束则返回 `run_not_finished`。
 
@@ -337,7 +337,7 @@ uv run ruff check app tests
 
 ## 下一步
 
-验收对照、部署验证记录与已知限制见 [`docs/acceptance.md`](docs/acceptance.md)，多副本决策见 [`docs/adr/0002-multi-replica.md`](docs/adr/0002-multi-replica.md)。
+验收对照、部署验证记录与已知限制见 [`docs/acceptance.md`](docs/acceptance.md)，多副本决策见 [`docs/adr/0002-multi-replica.md`](docs/adr/0002-multi-replica.md)，**已实现功能的完整清单见 [`docs/implementation-report.md`](docs/implementation-report.md)**。
 
 仍然开放的方向：
 

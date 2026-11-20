@@ -20,8 +20,8 @@ from app.repositories.base import ScopedRepository
 
 MAX_PAGE_SIZE = 100
 
-#: Statuses that still accept a transition. `interrupted` is written by startup
-#: reconciliation and is already terminal.
+#: Statuses that still accept a transition. `interrupted` only exists on rows
+#: written before read-time reconciliation (P5) and is already terminal.
 ACTIVE_STATUSES = ("pending", "running")
 
 

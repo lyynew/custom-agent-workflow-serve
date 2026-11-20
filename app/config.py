@@ -50,10 +50,10 @@ class Settings(BaseSettings):
     workflow_max_concurrent_runs: int = Field(default=8, ge=1)
     #: Hard ceiling for one process/instance, regardless of tenant count.
     workflow_instance_max_runs: int = Field(default=32, ge=1)
-    #: Lease takes over a run only after this much silence.
-    workflow_lease_seconds: float = Field(default=45.0, gt=0)
+    #: How often a running poller refreshes `workflow_runs.heartbeat_at`.
+    #: A stale heartbeat on a `running` run means its poller died; the next read
+    #: reconciles the real state from the runtime.
     workflow_heartbeat_seconds: float = Field(default=10.0, gt=0)
-    workflow_reaper_interval_seconds: float = Field(default=15.0, gt=0)
 
     # Model configuration. Keys are never stored: `api_key_encrypted` holds an
     # `env:VARIABLE` reference, resolved at call time.

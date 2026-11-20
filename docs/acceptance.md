@@ -109,7 +109,7 @@ docker compose up -d --build  # 部署验证（见文末「部署验证记录」
 | 隔离 | 跨应用读会话 | `404` |
 | 备份 | `scripts/backup-db.sh` | 生成 6.8KB dump，含 `CREATE SCHEMA biz`，19 张表 |
 | 恢复 | 恢复到临时库 `restore_check` | `applications=2`、`conversations=1`、`messages=2`、`workflow_runs=1`、`thread=2`、`run=2` |
-| 重启恢复 | `docker compose restart ai-service` | 恢复 healthy；孤儿 run 变 `interrupted`；历史数据仍可读 |
+| 重启恢复 | `docker compose restart ai-service` | 恢复 healthy；孤儿 run 在下次被读到时时收敛为真实状态；历史数据仍可读 |
 
 ## P5 增补验证
 
