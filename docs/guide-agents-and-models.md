@@ -86,6 +86,8 @@ Aegra 是「把 LangGraph 图跑成 HTTP 服务」的那一层（自托管版的
 
 ### 2.2 三步换掉现有配置
 
+> **DeepSeek 已经内置**：`seed/models.example.json` 里已有一条 `deepseek` 配置（`https://api.deepseek.com/v1` + `deepseek-chat` + `env:DEEPSEEK_API_KEY`），你只需要在 `.env` 填好 `DEEPSEEK_API_KEY`，执行 `seed-models` 即可。下面以 DeepSeek 为例说明这类改造的完整形态。
+
 **第一步**：改 `seed/models.example.json`（或你自己维护的 json）：
 
 ```json

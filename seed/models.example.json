@@ -19,5 +19,17 @@
     "timeout_seconds": 60,
     "extra": {},
     "enabled": false
+  },
+  {
+    "name": "deepseek",
+    "provider": "openai",
+    "base_url": "https://api.deepseek.com/v1",
+    "model_name": "deepseek-chat",
+    "api_key_encrypted": "env:DEEPSEEK_API_KEY",
+    "temperature": 0.3,
+    "max_tokens": 2048,
+    "timeout_seconds": 60,
+    "extra": {},
+    "enabled": true
   }
 ]
