@@ -1,0 +1,21 @@
+{
+  "name": "aegra-spike",
+  "dependencies": ["./src"],
+  "graphs": {
+    "echo_agent": {
+      "path": "./src/graphs/echo_agent.py:graph",
+      "description": "Spike agent with deterministic streaming output"
+    },
+    "sum_workflow": {
+      "path": "./src/graphs/sum_workflow.py:graph",
+      "description": "Spike workflow that adds two numbers"
+    }
+  },
+  "auth": {
+    "path": "./auth.py:auth"
+  },
+  "http": {
+    "app": "./custom_routes.py:app",
+    "enable_custom_route_auth": true
+  }
+}

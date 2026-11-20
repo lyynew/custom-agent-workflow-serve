@@ -201,15 +201,15 @@
 | model_configs | id, name UK, provider, base_url, model_name, api_key_encrypted, temperature, max_tokens, timeout | `name` unique |
 | Checkpoint 表 | 由运行时管理 | 独立 schema |
 
-建议：业务表放 `biz` schema，运行时表放 `aegra` schema，避免 `threads` / `runs` 命名冲突与迁移耦合。
+建议：业务表放 `biz` schema，运行时表留在 `public`（Aegra 管理）；两套迁移使用不同的版本表。
 
 ### 3.9 部署
 
-- Compose：`ai-service` + `postgres:16` + `redis:7`（若采用 Aegra 运行底座）
+- Compose：`ai-service` + `postgres:16`；v1 单实例不启用 Redis（多实例 / 崩溃恢复再引入 `redis:7`）
 - 卷：`pgdata`（必需）、`redisdata`（可选）
 - 健康检查：`/health`、`pg_isready`、`redis-cli ping`
-- 启动顺序：PG / Redis healthy → 迁移 → 服务
-- 资源：ai-service `mem_limit 2g` + 单 worker；PG `shared_buffers=512MB`、`max_connections=100`；Redis `maxmemory 128mb` + `noeviction`（队列不能被淘汰）
+- 启动顺序：PG healthy（Redis 若启用）→ 迁移 → 服务
+- 资源：ai-service `mem_limit 2g` + 单 worker；PG `shared_buffers=512MB`、`max_connections=100`；Redis（若启用）`maxmemory 128mb` + `noeviction`（队列不能被淘汰）
 - SSE：反代关闭缓冲（`proxy_buffering off`），读超时 ≥ 300s
 - 备份：`pg_dump -Fc` 每日，保留 7 份；恢复步骤写入 README 并演练
 - 重启恢复：会话 / 消息 / checkpoint 可读；进行中的 run 标记 `failed` 或 `interrupted`，不假装仍在运行
@@ -219,7 +219,7 @@
 
 ### 4.1 它是什么
 
-Aegra 是自托管的 LangGraph Platform（LangSmith Deployments）替代品：FastAPI + PostgreSQL + Redis，Agent Protocol 兼容，可直接运行现有 LangGraph 图，提供 threads / runs / assistants、SSE、checkpoint、断线重连、HITL、cron、webhook、多实例 worker。Apache 2.0。
+Aegra 是自托管的 LangGraph Platform（LangSmith Deployments）替代品：FastAPI + PostgreSQL（可选 Redis），Agent Protocol 兼容，可直接运行现有 LangGraph 图，提供 threads / runs / assistants、SSE、checkpoint、断线重连、HITL、cron、webhook、多实例 worker。Apache 2.0。
 
 ### 4.2 能力对照
 
@@ -232,31 +232,28 @@ Aegra 是自托管的 LangGraph Platform（LangSmith Deployments）替代品：F
 | Checkpoint 持久化 | 覆盖 | Postgres checkpointer |
 | 运行状态管理 | 覆盖 | runs 生命周期 |
 | 业务 API（会话 / 消息 / 执行记录） | 不覆盖 | 需自定义路由 + 自建表 |
-| 轻量单机 | 部分 | 引入 Redis 与 worker 架构，功能面大于需求 |
+| 轻量单机 | 覆盖 | 单实例默认不启用 Redis；仅多实例 / 崩溃恢复需要 |
 
 ### 4.3 三个可选方案
 
 | 方案 | 形态 | 优点 | 代价 |
 |---|---|---|---|
-| A. Aegra 作宿主 | 单进程：Aegra + `/api/v1` 自定义路由 | SSE / checkpoint / run 生命周期 / 重连现成，自研运行时最少 | 绑定 Agent Protocol 形态；Redis 必选；业务路由需经 SDK / loopback 调 runtime；项目较新 |
+| A. Aegra 作宿主 | 单进程：Aegra + `/api/v1` 自定义路由 | SSE / checkpoint / run 生命周期 / 重连现成，自研运行时最少 | 绑定 Agent Protocol 形态；默认不强制 Redis（多实例才需要）；业务路由需经 SDK / loopback 调 runtime；项目较新 |
 | B. 自建运行时 | FastAPI + LangGraph + `AsyncPostgresSaver` | 依赖最少（无 Redis）、API 形状完全自控、4C4G 最省 | 需自研 run 状态、SSE、恢复；无 HITL / cron（本项目不需要） |
 | C. 网关 + Aegra 双服务 | Gateway 管认证业务，Aegra 只做 runtime | 职责清晰，可独立扩缩容 | 多一跳、双写、内网信任链、4C4G 压力最大 |
 
-### 4.4 建议
+### 4.4 结论（2026-11-20）
 
-**先做限时 Spike，再定 A / B；C 不推荐。**
+Spike 5 项全部通过，**采纳方案 A：Aegra 作宿主**；C 不采用。完整记录见 `docs/adr/0001-runtime-choice.md`，验证代码见 `spike/aegra/`。
 
-Spike 必须回答 5 个问题（任一为否，直接转 B）：
+关键实测结果：
 
-1. `@auth.authenticate` 内能否访问数据库 / Redis 读 `applications`？若不能，能否启动时加载 + 热更新？
-2. 自定义 FastAPI 路由能否稳定挂载 `/api/v1`，并与 Agent Protocol 共用同一认证？
-3. SSE 能否从业务路由透传（事件可映射、断连可取消、错误可捕获）？
-4. 两个 app + 相同 `user_id` 的隔离能否被 metadata filter 严格保证（含 by-id 读写与删除）？
-5. 4C4G 下 Aegra + PG + Redis 的实际内存与冷启动是否可接受？Aegra 迁移与 Alembic 能否共存？
-
-结论写入 `docs/adr/0001-runtime-choice.md`。
-
-**倾向**：Spike 全过则选 A——「执行状态 + 流式 + 恢复」正是最容易做砸的部分，复用比自研划算；同时用一层 `RuntimeAdapter` 隔离 Aegra 细节，保留换回 B 的出口。Spike 有硬伤则选 B，不为用 Aegra 而增加中间层。
+- 认证 handler 可在请求内查 PostgreSQL（asyncpg 连接池）；两应用独立密钥生效，过期 / 错签名 / `alg=none` / 未知应用 / 跨应用复用均 401。
+- `/api/v1` 自定义路由与 Agent Protocol 共用同一认证；无 Token 401。
+- 原生 SSE 是 `messages/partial` 累计快照并携带内部 metadata，**不能直接对外**，必须适配为增量事件。
+- 两个应用、相同 `user_id=10001`：跨应用读写均 404，列表 3 条 vs 0 条，无交集。
+- Aegra 进程 169MB + PostgreSQL 45MB，单实例无需 Redis；Aegra 独占 `public.alembic_version`，业务侧需用独立版本表。
+- 重启后 thread、checkpoint、列表均恢复；Workflow 同步执行返回正确结果。
 
 ## 5. 推荐落地形态（方案 A）
 
@@ -283,8 +280,8 @@ Spike 必须回答 5 个问题（任一为否，直接转 B）：
                │
       ┌────────┴────────┐
       ▼                 ▼
-  PostgreSQL          Redis
-  biz + aegra schema  队列 / SSE pubsub
+  PostgreSQL        Redis（可选）
+  biz + public      v1 不启用；多实例再引入
 ```
 
 关键点：
@@ -326,8 +323,8 @@ Spike 必须回答 5 个问题（任一为否，直接转 B）：
 | 风险 | 影响 | 对策 |
 |---|---|---|
 | Aegra 较新、API 变动 | 升级破坏 | 固定精确版本；`RuntimeAdapter` 隔离；升级跑冒烟测试 |
-| Redis 成硬依赖 | 与「按需引入」冲突 | 接受并写入部署文档；限制内存；明确故障降级策略 |
-| 4C4G 内存不足 | OOM / 重启 | 单 worker；PG / Redis 限额；压测并发；预留升配 |
+| Redis 被误当必选 | 增加运维面 | 单实例默认关闭；仅多实例引入并写入部署文档 |
+| 4C4G 内存不足 | OOM / 重启 | 单 worker；PG / Redis（若启用）限额；压测并发；预留升配 |
 | 消息与 checkpoint 双源不一致 | 历史错乱 | 明确写入时机；失败补偿；UI 只读消息表 |
 | SSE 被反代缓冲 | 流式失效 | `X-Accel-Buffering: no` + 关闭 buffering + 调整超时 |
 | 密钥泄漏 | 全量身份伪造 | 仅环境变量；日志脱敏；最小权限；轮换流程 |
@@ -339,7 +336,7 @@ Spike 必须回答 5 个问题（任一为否，直接转 B）：
 
 | # | 问题 | 选项 | 建议 |
 |---|---|---|---|
-| D1 | 运行底座选 A / B / C | Aegra 宿主 / 自建 / 双服务 | **已定**：先 Spike，A 优先，B 兜底 |
+| D1 | 运行底座选 A / B / C | Aegra 宿主 / 自建 / 双服务 | **已定**：Spike 通过，采纳 A（Aegra 作宿主） |
 | D2 | `allowed_*` 空数组语义 | 全允许 / 全禁止 | **已定**：`["*"]` 全允许，`[]` 全禁止 |
 | D3 | Workflow 默认模式 | 同步 / 异步 | **已定**：默认异步；`mode=sync` 超时 30s |
 | D4 | JWT 算法范围 | 仅 HS256 / HS256 + RS256 | **已定**：HS256 + RS256 |
@@ -358,5 +355,5 @@ Spike 必须回答 5 个问题（任一为否，直接转 B）：
 - Workflow 默认异步；同步超时 30s。
 - SSE 断流取消 run；消息完成时落库，异常落 `partial`。
 - 应用与模型配置先用 CLI / seed，不做管理后台。
-- 业务表 `biz` schema，运行时表 `aegra` schema。
-- 单实例 Docker Compose；Redis 随运行底座引入。
+- 业务表 `biz` schema，运行时表在 `public`（Aegra 管理）。
+- 单实例 Docker Compose；v1 默认不启用 Redis。

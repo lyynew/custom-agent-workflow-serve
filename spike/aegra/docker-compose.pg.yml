@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aegra-spike-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aegra
+      POSTGRES_PASSWORD: aegra
+      POSTGRES_DB: aegra
+    ports:
+      - "5432:5432"
+    volumes:
+      - aegra_spike_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegra -d aegra"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  aegra_spike_pgdata:
