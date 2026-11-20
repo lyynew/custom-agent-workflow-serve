@@ -16,6 +16,8 @@ from aegra_api.constants import ASSISTANT_NAMESPACE_UUID
 from app.runtime.adapter import (
     RunFailed,
     RunFinished,
+    RunHandle,
+    RunSnapshot,
     RunStarted,
     RuntimeCredentials,
     RuntimeEvent,
@@ -24,6 +26,22 @@ from app.runtime.adapter import (
     ToolCallEvent,
     ToolResultEvent,
 )
+
+#: Aegra reports LangGraph Platform statuses; the business layer only sees the
+#: normalised vocabulary in `adapter.RUN_STATUSES`.
+_STATUS_MAP = {
+    "pending": "pending",
+    "running": "running",
+    "success": "succeeded",
+    "error": "failed",
+    "timeout": "timed_out",
+    "interrupted": "cancelled",
+}
+
+
+def normalise_run_status(status: Any) -> str:
+    raw = str(status or "pending")
+    return _STATUS_MAP.get(raw, raw)
 
 
 class RuntimeCallError(RuntimeError):
@@ -324,3 +342,77 @@ class AegraRuntimeAdapter:
                     seen_results,
                 ):
                     yield event
+
+    async def start_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        graph_id: str,
+        input: Mapping[str, Any],
+    ) -> RunHandle:
+        body = {
+            "assistant_id": assistant_id_for(graph_id),
+            "input": dict(input),
+        }
+        async with self._client() as client:
+            response = await client.post(
+                f"/threads/{thread_id}/runs",
+                json=body,
+                headers=credentials.headers(),
+            )
+
+        if response.status_code >= 400:
+            raise RuntimeCallError(response.status_code, "start_run")
+
+        data = response.json()
+        run_id = str(data.get("run_id") or "")
+        if not run_id:
+            raise RuntimeCallError(502, "start_run")
+        return RunHandle(run_id=run_id, status=normalise_run_status(data.get("status")))
+
+    async def get_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        run_id: str,
+    ) -> RunSnapshot | None:
+        async with self._client() as client:
+            response = await client.get(
+                f"/threads/{thread_id}/runs/{run_id}",
+                headers=credentials.headers(),
+            )
+
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise RuntimeCallError(response.status_code, "get_run")
+
+        data = response.json()
+        output = data.get("output")
+        return RunSnapshot(
+            run_id=str(data.get("run_id") or run_id),
+            status=normalise_run_status(data.get("status")),
+            output=output if isinstance(output, dict) else None,
+            error_message=data.get("error_message"),
+        )
+
+    async def cancel_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        run_id: str,
+    ) -> bool:
+        async with self._client() as client:
+            response = await client.post(
+                f"/threads/{thread_id}/runs/{run_id}/cancel",
+                headers=credentials.headers(),
+            )
+
+        if response.status_code == 404:
+            return False
+        if response.status_code >= 400:
+            raise RuntimeCallError(response.status_code, "cancel_run")
+        return True

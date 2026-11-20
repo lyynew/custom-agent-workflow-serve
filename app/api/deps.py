@@ -17,6 +17,7 @@ from app.database.session import get_session
 from app.repositories.conversations import ConversationRepository, MessageRepository
 from app.runtime.adapter import RuntimeAdapter, RuntimeCredentials
 from app.runtime.aegra import AegraRuntimeAdapter
+from app.services.workflows import TaskLauncher, task_launcher
 
 
 async def get_auth_context(user: User = Depends(require_auth)) -> AuthContext:
@@ -32,6 +33,15 @@ async def get_auth_context(user: User = Depends(require_auth)) -> AuthContext:
 @lru_cache
 def get_runtime_adapter() -> RuntimeAdapter:
     return AegraRuntimeAdapter(get_settings().self_url)
+
+
+def get_task_launcher() -> TaskLauncher:
+    """Background launcher for async workflow execution.
+
+    A single instance is shared so tests can swap it for one that records the
+    coroutines instead of racing them.
+    """
+    return task_launcher
 
 
 def get_runtime_credentials(

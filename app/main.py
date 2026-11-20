@@ -24,6 +24,8 @@ from app.auth.store import application_store
 from app.database.session import dispose_engine, get_session_factory
 from app.models.workflow_run import WorkflowRun
 from app.repositories.errors import ResourceNotFound
+from app.services.workflows import task_launcher
+from app.workflows import workflow_registry
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +53,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Fail fast on a missing migration or an unresolvable secret_ref.
     await application_store.warmup()
     agent_registry.validate_config()
+    workflow_registry.validate_config()
     await _mark_interrupted_runs()
 
     logger.info("AI service started with %d application(s)", len(application_store.cached_app_ids))
     try:
         yield
     finally:
+        # Stop background workflow pollers before the pool goes away, so they
+        # can record `interrupted` instead of failing on a closed engine.
+        await task_launcher.shutdown()
         await dispose_engine()
 
 

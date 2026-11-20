@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=5, ge=0)
     db_pool_timeout_seconds: float = Field(default=30.0, gt=0)
 
+    # Workflow execution. The run timeout must stay well below the access-token
+    # lifetime: a background poller reuses the caller's token to read the run.
+    workflow_sync_timeout_seconds: float = Field(default=30.0, gt=0)
+    workflow_run_timeout_seconds: float = Field(default=600.0, gt=0)
+    workflow_poll_interval_seconds: float = Field(default=0.3, gt=0)
+    workflow_max_concurrent_runs: int = Field(default=8, ge=1)
+
     @field_validator("database_url")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

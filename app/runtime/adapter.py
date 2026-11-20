@@ -72,6 +72,27 @@ class RunWaitResult:
     run_id: str | None = None
 
 
+#: Statuses a runtime may report for background work, normalised so that the
+#: business layer never depends on a vendor vocabulary.
+RUN_STATUSES = ("pending", "running", "succeeded", "failed", "timed_out", "cancelled")
+
+
+@dataclass(frozen=True)
+class RunHandle:
+    """A run that has been started but not necessarily finished."""
+
+    run_id: str
+    status: str = "pending"
+
+
+@dataclass(frozen=True)
+class RunSnapshot:
+    run_id: str
+    status: str
+    output: dict[str, Any] | None = None
+    error_message: str | None = None
+
+
 class RuntimeAdapter(Protocol):
     async def create_thread(
         self,
@@ -119,3 +140,34 @@ class RuntimeAdapter(Protocol):
         graph_id: str,
         input: Mapping[str, Any],
     ) -> AsyncIterator[RuntimeEvent]: ...
+
+    async def start_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        graph_id: str,
+        input: Mapping[str, Any],
+    ) -> RunHandle:
+        """Start execution and return immediately; the run keeps going."""
+        ...
+
+    async def get_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        run_id: str,
+    ) -> RunSnapshot | None:
+        """Return the current snapshot, or None when the runtime lost the run."""
+        ...
+
+    async def cancel_run(
+        self,
+        credentials: RuntimeCredentials,
+        *,
+        thread_id: str,
+        run_id: str,
+    ) -> bool:
+        """Ask the runtime to stop a run. False when it is already unknown."""
+        ...

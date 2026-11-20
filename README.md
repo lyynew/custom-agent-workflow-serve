@@ -10,8 +10,8 @@
 |---|---|---|
 | P0 Spike | 完成 | 认证查库、自定义路由、SSE 适配、跨应用隔离、资源与迁移验证 |
 | P1 基础与认证 | 完成 | 工程骨架、`biz` schema、Alembic、JWT 校验、应用缓存、隔离仓储、`RuntimeAdapter`、39 个测试 |
-| P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件、69 个测试 |
-| P3 Workflow | 待开始 | Workflow Registry、同步 / 异步执行、状态与结果 |
+| P2 Agent 与会话 | 完成 | Agent Registry、会话 / 消息 API、同步 / 流式对话、多轮上下文、工具事件 |
+| P3 Workflow | 完成 | Workflow Registry、同步 / 异步执行、run 状态与结果、取消与超时、98 个测试 |
 | P4 交付 | 待开始 | Docker Compose、健康检查、备份、重启恢复、全量验收 |
 
 ## 架构
@@ -44,7 +44,8 @@ app/
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
 ├── agents/                 Agent Registry 与示例 Agent（echo_agent / reverse_agent）
-├── services/               会话编排、消息持久化
+├── workflows/              Workflow Registry 与示例 Workflow（sum / text_stats）
+├── services/               会话编排、消息持久化、Workflow 执行编排
 ├── models/                 SQLAlchemy 模型（biz schema）
 ├── repositories/           强制按 (app_id, user_id) 过滤的仓储
 ├── database/               异步引擎与会话
@@ -132,6 +133,12 @@ X-App-Id: <app_id>
 | GET | `/api/v1/conversations/{id}` | 会话详情 |
 | GET | `/api/v1/conversations/{id}/messages` | 消息历史（`limit` / `before`） |
 | DELETE | `/api/v1/conversations/{id}` | 软删除会话，并尽力删除运行时 thread |
+| GET | `/api/v1/workflows` | 仅返回当前应用 `allowed_workflows` 内的 Workflow（含输入 JSON Schema） |
+| POST | `/api/v1/workflows/{workflow_id}/execute` | 执行 Workflow；`mode=async` 返回 202，`mode=sync` 直接返回结果 |
+| GET | `/api/v1/workflows/runs` | 执行记录列表（`workflow_id` / `status` / `limit` / `before`） |
+| GET | `/api/v1/workflows/runs/{run_id}` | 执行状态 |
+| GET | `/api/v1/workflows/runs/{run_id}/result` | 执行结果 |
+| POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消执行（对已结束的 run 返回 409） |
 
 对话请求体：
 
@@ -151,6 +158,42 @@ event: done         {conversation_id, message_id, run_id, finish_reason}
 ```
 
 `token` 是**增量**，不是累计快照。流式失败时，已生成内容会以 `status="partial"` 落库，随后发送 `error`，不发送 `done`。
+
+## Workflow
+
+执行请求体：
+
+```json
+{"mode": "async", "input": {"a": 2, "b": 3}}
+```
+
+- `mode` 默认 `async`：立即返回 `202` 与 `run_id`，之后轮询状态 / 结果。
+- `mode=sync`：在请求内等待，默认上限 30s（`WORKFLOW_SYNC_TIMEOUT_SECONDS`）。超时会取消运行并返回 `504 workflow_timeout`，长任务请用异步模式。
+- `input` 按 Workflow 自身的 Pydantic 模型校验，未知字段直接 `422 invalid_input`，不会创建 thread 或执行记录。
+
+运行状态：`pending → running → succeeded | failed | timed_out | cancelled`。进程重启时，未完成的 `pending` / `running` 会被标记为 `interrupted`。
+
+结果接口只对 `succeeded` 返回 200；其余终态返回 `409`，`error.code` 分别是 `workflow_failed` / `workflow_timeout` / `workflow_cancelled`，未结束则返回 `run_not_finished`。
+
+```bash
+curl -s -X POST http://127.0.0.1:2026/api/v1/workflows/sum_workflow/execute \
+  -H "Authorization: Bearer $TOKEN" -H "X-App-Id: agriculture_app" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"sync","input":{"a":2,"b":3}}'
+# {"run_id":"...","workflow_id":"sum_workflow","status":"succeeded","output":{"a":2,"b":3,"total":5}, ...}
+```
+
+两个已知边界：
+
+1. 后台轮询沿用调用方 Token 访问运行时的 run 接口，因此 `WORKFLOW_RUN_TIMEOUT_SECONDS`（默认 600s）必须明显小于 Token 有效期。
+2. 并发上限是实例级软限制（`WORKFLOW_MAX_CONCURRENT_RUNS`，默认 8），超出返回 `429 too_many_runs`；同时到达的请求可能同时越过检查。
+
+### 新增 Workflow
+
+1. 写一个 LangGraph 图并 `compile()`，放在 `app/workflows/implementations/`，同时导出输入用的 Pydantic 模型。
+2. 在 `aegra.json` 的 `graphs` 中增加 `workflow_id → 图路径`。
+3. 在 `app/workflows/__init__.py` 注册 `WorkflowDefinition`（含 `input_model`）。
+4. 重启服务；启动时会校验每个注册 Workflow 都有对应的图。
 
 ### 新增 Agent
 
@@ -179,9 +222,10 @@ uv run ruff check app tests
 4. 业务表在 `biz` schema，Alembic 使用 `biz.biz_alembic_version`；Aegra 独占 `public.alembic_version`。
 5. 对外只暴露 `/api/v1`；部署时由反代屏蔽 `/threads`、`/runs`、`/assistants`、`/store`、`/crons`。
 6. 依赖固定版本，`uv.lock` 随仓库提交。
+7. `workflow_runs` 是运行时 run 的业务视图：对外只出现业务 UUID，运行时的 `run_id` / `thread_id` 仅内部留存；状态变更用条件更新，避免后台轮询覆盖取消结果。
 
 ## 下一步
 
-P3：Workflow Registry、`/api/v1/workflows`、同步 / 异步执行、运行状态与结果持久化、取消与超时。
+P4：Docker Compose 独立部署、健康检查、数据库备份、重启恢复演练、全量验收对照。
 
 更完整的背景与验收映射见 [`docs/requirements-analysis.md`](docs/requirements-analysis.md)。

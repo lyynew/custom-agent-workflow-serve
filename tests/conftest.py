@@ -24,14 +24,14 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
-from app.api.deps import get_runtime_adapter
+from app.api.deps import get_runtime_adapter, get_task_launcher
 from app.auth.context import AuthContext
 from app.auth.jwt import JwtConfig
 from app.auth.store import ApplicationConfig, application_store
 from app.database.session import dispose_engine, get_session_factory
 from app.main import app
 from app.repositories.applications import ApplicationRepository
-from tests.fakes import FakeRuntime
+from tests.fakes import CollectingLauncher, FakeRuntime
 
 
 def _split_database_url() -> tuple[str, str]:
@@ -172,3 +172,15 @@ def fake_runtime():
     app.dependency_overrides[get_runtime_adapter] = lambda: runtime
     yield runtime
     app.dependency_overrides.pop(get_runtime_adapter, None)
+
+
+@pytest.fixture
+def workflow_launcher():
+    """Collects background workflow coroutines so tests control when they run."""
+    launcher = CollectingLauncher()
+    app.dependency_overrides[get_task_launcher] = lambda: launcher
+    try:
+        yield launcher
+    finally:
+        app.dependency_overrides.pop(get_task_launcher, None)
+        launcher.close()
