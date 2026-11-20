@@ -14,6 +14,10 @@
       "path": "./app/agents/implementations/llm_agent.py:graph",
       "description": "Model-backed agent driven by biz.model_configs"
     },
+    "assistant_agent": {
+      "path": "./app/agents/implementations/assistant_agent.py:graph",
+      "description": "Reference agent: plan/tools ReAct loop with a loop guard"
+    },
     "sum_workflow": {
       "path": "./app/workflows/implementations/sum_workflow.py:graph",
       "description": "Minimal workflow: adds two integers"

@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     model_config_cache_ttl_seconds: int = Field(default=60, ge=0)
     default_model_config: str = "demo"
 
+    #: Tool rounds one agent turn may take before the loop guard stops it.
+    agent_max_tool_iterations: int = Field(default=4, ge=1)
+
     @field_validator("database_url")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

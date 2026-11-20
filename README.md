@@ -44,7 +44,7 @@ app/
 ├── cli.py                  应用注册 CLI
 ├── api/                    路由、统一错误、依赖
 ├── auth/                   JWT、AuthContext、应用缓存、Aegra 认证桥接
-├── agents/                 Agent Registry 与示例 Agent（echo / reverse / llm）
+├── agents/                 Agent Registry 与示例 Agent（assistant / echo / reverse / llm）
 ├── workflows/              Workflow Registry 与示例 Workflow（sum / text_stats）
 ├── services/               会话编排、消息持久化、Workflow 执行编排、模型解析、限流
 ├── cache/                  Redis 客户端（不可用时自动降级）
@@ -275,6 +275,21 @@ curl -s -X POST http://127.0.0.1:2026/api/v1/workflows/sum_workflow/execute \
 2. 在 `aegra.json` 的 `graphs` 中增加 `agent_id → 图路径`。
 3. 在 `app/agents/__init__.py` 注册 `AgentDefinition`。
 4. 重启服务；启动时会校验每个注册 Agent 都有对应的图。
+
+参考实现见 `app/agents/implementations/assistant_agent.py`，它把 Agent 该有的四件事都写全了：
+
+```text
+START → plan ─┬─(有 tool_calls)→ tools ─┐
+              │                        │
+              └─(无 tool_calls)→ END   └──→ plan   ← 循环，直到给出答案或触到上限
+```
+
+- **模型来自配置**：`plan` 节点每次调用 `biz.model_configs` 里的模型，不写死；
+- **工具**：`calculator`（AST 求值，不走 `eval`）、`current_time`、`text_stats`；
+- **循环保护**：`AGENT_MAX_TOOL_ITERATIONS`（默认 4）轮后强制收尾，避免模型无限调工具；
+- **离线可跑**：`echo` 这类不支持 tool calling 的 provider 自动切到规则路由，节点、边、工具循环完全一致，CI 不需要 API key。
+
+拷贝这个文件改 `SYSTEM_PROMPT` 和 `TOOLS` 就能作为新业务 Agent 的起点。
 
 ## 模型配置
 

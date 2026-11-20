@@ -28,4 +28,13 @@ agent_registry.register(
     )
 )
 
+agent_registry.register(
+    AgentDefinition(
+        agent_id="assistant_agent",
+        name="Assistant Agent",
+        description="Reference agent: model-driven planning with a calculator, clock and text-stats tool loop.",
+        tags=("llm", "tool", "reference"),
+    )
+)
+
 __all__ = ["AgentDefinition", "agent_registry"]
