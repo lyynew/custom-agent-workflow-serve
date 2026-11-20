@@ -49,3 +49,5 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "app/api/**" = ["B008"]
+# Environment must be pinned before `app` is imported, so imports cannot be first.
+"tests/conftest.py" = ["E402"]

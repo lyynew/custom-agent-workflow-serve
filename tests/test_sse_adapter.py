@@ -117,3 +117,107 @@ async def test_stream_error_raises_runtime_error():
             input={},
         ):
             pass
+
+
+STREAMED_ARGS_BODY = """event: metadata
+data: {"run_id":"run-2"}
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-9","name":"calculator","args":{}}]}]
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-9","name":"calculator","args":{"expression":"25"}}]}]
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-9","name":"calculator","args":{"expression":"25*4"}}]}]
+
+event: messages/complete
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-9","name":"calculator","args":{"expression":"25*4"}}]}]
+
+event: messages/partial
+data: [{"id":"m2","type":"tool","name":"calculator","tool_call_id":"call-9","content":"25*4 = 100"}]
+
+"""
+
+
+async def test_tool_call_is_announced_once_with_complete_arguments():
+    """Streaming providers send the call before its arguments.
+
+    Regression: the first snapshot has `args={}`, and announcing it there gave
+    the caller an empty argument object.
+    """
+    adapter = _adapter(
+        lambda _request: httpx.Response(
+            200,
+            content=STREAMED_ARGS_BODY.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    credentials = RuntimeCredentials(app_id="agriculture_app", authorization="Bearer test")
+
+    events = [
+        event
+        async for event in adapter.stream_thread_run(
+            credentials,
+            thread_id="t-2",
+            graph_id="assistant_agent",
+            input={"messages": []},
+        )
+    ]
+
+    calls = [event for event in events if isinstance(event, ToolCallEvent)]
+    assert len(calls) == 1
+    assert '"expression"' in calls[0].arguments
+    assert "25*4" in calls[0].arguments
+
+    # Ordering matters: the call must precede the result.
+    assert isinstance(events[events.index(calls[0]) + 1], ToolResultEvent)
+
+
+PARTIAL_ONLY_ARGS_BODY = """event: metadata
+data: {"run_id":"run-3"}
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-7","name":"calculator","args":{}}]}]
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-7","name":"calculator","args":{"expression":"25"}}]}]
+
+event: messages/partial
+data: [{"id":"m1","type":"ai","content":"","tool_calls":[{"id":"call-7","name":"calculator","args":{"expression":"25*4"}}]}]
+
+event: messages/complete
+data: [{"content":"25*4 = 100","type":"tool","name":"calculator","id":"m2","tool_call_id":"call-7"}]
+
+"""
+
+
+async def test_tool_call_arguments_survive_a_partial_only_stream():
+    """The runtime only sends assistant messages as cumulative partials.
+
+    `messages/complete` is emitted for the tool message, never for the AI
+    message, so the last partial snapshot is the only source of final arguments.
+    """
+    adapter = _adapter(
+        lambda _request: httpx.Response(
+            200,
+            content=PARTIAL_ONLY_ARGS_BODY.encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    credentials = RuntimeCredentials(app_id="agriculture_app", authorization="Bearer test")
+
+    events = [
+        event
+        async for event in adapter.stream_thread_run(
+            credentials,
+            thread_id="t-3",
+            graph_id="simple_agent",
+            input={"messages": []},
+        )
+    ]
+
+    calls = [event for event in events if isinstance(event, ToolCallEvent)]
+    assert len(calls) == 1
+    assert "25*4" in calls[0].arguments
+    assert isinstance(events[events.index(calls[0]) + 1], ToolResultEvent)

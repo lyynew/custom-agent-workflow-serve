@@ -189,6 +189,9 @@ class AegraRuntimeAdapter:
         last_content: dict[str, str],
         seen_calls: set[str],
         seen_results: set[str],
+        pending_calls: dict[str, tuple[str, str]],
+        *,
+        complete: bool,
     ) -> list[RuntimeEvent]:
         try:
             items = json.loads(payload)
@@ -206,6 +209,20 @@ class AegraRuntimeAdapter:
             item_type = item.get("type")
 
             if item_type == "tool":
+                # A tool that takes no arguments may only ever show up as an
+                # empty-args call in a partial snapshot; flush it here so the
+                # caller always sees `tool_call` before `tool_result`.
+                call_id = str(item.get("tool_call_id") or "")
+                flushed = pending_calls.pop(call_id, None)
+                if flushed is not None:
+                    events.append(
+                        ToolCallEvent(
+                            call_id=call_id or None,
+                            name=flushed[0],
+                            arguments=flushed[1],
+                        )
+                    )
+
                 result_key = message_id or f"tool:{item.get('tool_call_id') or ''}"
                 if result_key not in seen_results:
                     seen_results.add(result_key)
@@ -233,9 +250,26 @@ class AegraRuntimeAdapter:
                 call_id = str(call.get("id") or "")
                 if call_id and call_id in seen_calls:
                     continue
+                arguments = call.get("args", {})
+                # Arguments arrive in fragments: `{}` -> `{"expression": ""}` ->
+                # `{"expression": "25"}` -> ... -> final. Only the finished
+                # message carries the whole object, so partials are recorded and
+                # announced later, never forwarded half-built.
+                if not complete:
+                    # The runtime streams assistant messages as cumulative
+                    # partials only (a `messages/complete` is sent for tool
+                    # messages, not for the AI message). Keep the latest
+                    # snapshot and announce the call once its arguments are
+                    # settled — right before its result.
+                    if call_id:
+                        pending_calls[call_id] = (
+                            str(call.get("name") or ""),
+                            arguments if isinstance(arguments, str) else _stringify(arguments),
+                        )
+                    continue
+                pending_calls.pop(call_id, None)
                 if call_id:
                     seen_calls.add(call_id)
-                arguments = call.get("args", {})
                 events.append(
                     ToolCallEvent(
                         call_id=call_id,
@@ -253,9 +287,17 @@ class AegraRuntimeAdapter:
         last_content: dict[str, str],
         seen_calls: set[str],
         seen_results: set[str],
+        pending_calls: dict[str, tuple[str, str]],
     ) -> list[RuntimeEvent]:
         if event_name in {"messages/partial", "messages/complete"}:
-            return self._adapt_message_event(payload, last_content, seen_calls, seen_results)
+            return self._adapt_message_event(
+                payload,
+                last_content,
+                seen_calls,
+                seen_results,
+                pending_calls,
+                complete=event_name == "messages/complete",
+            )
 
         if event_name == "metadata":
             try:
@@ -298,6 +340,7 @@ class AegraRuntimeAdapter:
         last_content: dict[str, str] = {}
         seen_calls: set[str] = set()
         seen_results: set[str] = set()
+        pending_calls: dict[str, tuple[str, str]] = {}
 
         async with self._client(None) as client, client.stream(
             "POST",
@@ -321,6 +364,7 @@ class AegraRuntimeAdapter:
                             last_content,
                             seen_calls,
                             seen_results,
+                            pending_calls,
                         ):
                             yield event
                     event_name, data_lines = None, []
@@ -340,6 +384,7 @@ class AegraRuntimeAdapter:
                     last_content,
                     seen_calls,
                     seen_results,
+                    pending_calls,
                 ):
                     yield event
 

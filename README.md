@@ -332,6 +332,8 @@ uv run python -m app.cli list-models     # 只输出 key 引用，不输出密�
 
 换供应商、换模型、调温度都是改配置行，不改代码；`MODEL_CONFIG_CACHE_TTL_SECONDS`（默认 60s）后生效。配置缺失或被禁用时，Agent 直接报错而不是静默降级。
 
+仓库内置 `deepseek` 配置（`seed/models.example.json`）：在 `.env` 填 `DEEPSEEK_API_KEY`，`seed-models` 后即可用；切换默认只需 `DEFAULT_MODEL_CONFIG=deepseek`。
+
 ## 测试
 
 ```bash

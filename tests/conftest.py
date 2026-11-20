@@ -14,6 +14,12 @@ os.environ["DATABASE_URL"] = os.environ.get(
 os.environ.setdefault("AGRI_JWT_SECRET", "test-agri-secret-0123456789abcdef0123456789")
 os.environ.setdefault("MGMT_JWT_SECRET", "test-mgmt-secret-0123456789abcdef0123456789")
 
+# The suite seeds a `demo` model config, so it must not inherit whatever
+# DEFAULT_MODEL_CONFIG (or a per-agent override) the developer's .env points at.
+os.environ["DEFAULT_MODEL_CONFIG"] = "demo"
+for _key in [k for k in os.environ if k.startswith("MODEL_CONFIG_")]:
+    del os.environ[_key]
+
 import asyncpg
 import httpx
 import pytest
