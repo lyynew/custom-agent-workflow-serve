@@ -21,6 +21,18 @@
     "enabled": false
   },
   {
+    "name": "mimo",
+    "provider": "openai",
+    "base_url": "https://api.xiaomimimo.com/v1",
+    "model_name": "mimo-v2.6-flash",
+    "api_key_encrypted": "env:MIMO_API_KEY",
+    "temperature": 0.3,
+    "max_tokens": 4096,
+    "timeout_seconds": 90,
+    "extra": {},
+    "enabled": true
+  },
+  {
     "name": "deepseek",
     "provider": "openai",
     "base_url": "https://api.deepseek.com/v1",

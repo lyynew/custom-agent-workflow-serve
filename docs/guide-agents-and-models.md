@@ -143,6 +143,44 @@ uv run python -m app.cli seed-models --file seed/models.example.json
 DEFAULT_MODEL_CONFIG=deepseek
 ```
 
+### 2.3.1 现成的例子：小米 MiMo（支持视觉与工具调用）
+
+`seed/models.example.json` 里有一条可直接用的 `mimo` 配置：
+
+```json
+{
+  "name": "mimo",
+  "provider": "openai",
+  "base_url": "https://api.xiaomimimo.com/v1",
+  "model_name": "mimo-v2.6-flash",
+  "api_key_encrypted": "env:MIMO_API_KEY",
+  "temperature": 0.3,
+  "max_tokens": 4096,
+  "timeout_seconds": 90,
+  "extra": {},
+  "enabled": true
+}
+```
+
+`mimo-v2.6-flash` / `mimo-v2.6-pro` 都验证过三件事：图片输入（content blocks 里的
+`image_url`，data URL 和公网地址都能吃）、function calling（`bind_tools` 正常产出
+`tool_calls`）、流式增量。所以兵峰耘农的拍照问诊、联网检索、农药关键词推荐都可以直接跑：
+
+```bash
+# .env
+MIMO_API_KEY=sk-xxxx
+DEFAULT_MODEL_CONFIG=mimo                       # 全部 Agent 用它
+MODEL_CONFIG_BINGFENG_AGENT=mimo                # 或者只给某个 Agent 用
+```
+
+两个坑：
+
+- **`max_tokens` 要给够**。MiMo 是推理模型，`reasoning_content` 的 token 也计入
+  `max_tokens`；设成 512 这种小值会出现"`finish_reason=length` 但 `content` 为空"——
+  不是接口坏了，是思考把预算吃完了。默认 4096 比较稳。
+- **公网图片地址能不能取到，看对方主机**。服务端是主动去拉图的，遇到防盗链或超时的
+  站会返回 `failed to download or process media content`；不确定时优先用 base64。
+
 ### 2.4 只给某一个 Agent 换模型
 
 不用改代码，用约定式环境变量 `MODEL_CONFIG_<AGENT_ID>`：

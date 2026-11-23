@@ -351,7 +351,9 @@ uv run python -m app.cli list-models     # 只输出 key 引用，不输出密�
 
 换供应商、换模型、调温度都是改配置行，不改代码；`MODEL_CONFIG_CACHE_TTL_SECONDS`（默认 60s）后生效。配置缺失或被禁用时，Agent 直接报错而不是静默降级。
 
-仓库内置 `deepseek` 配置（`seed/models.example.json`）：在 `.env` 填 `DEEPSEEK_API_KEY`，`seed-models` 后即可用；切换默认只需 `DEFAULT_MODEL_CONFIG=deepseek`。
+仓库内置两条可直接用的配置（`seed/models.example.json`）：`mimo`（小米 MiMo，OpenAI 兼容，**支持图片输入与工具调用**）和 `deepseek`（纯文本）。在 `.env` 填好对应密钥、`seed-models` 后即可用；切换默认只需 `DEFAULT_MODEL_CONFIG=mimo`。
+
+MiMo 是推理模型，`reasoning_content` 的 token 也算进 `max_tokens`，所以示例给到 4096——设太小会出现「`finish_reason=length` 但正文为空」。
 
 ## 联网搜索
 
