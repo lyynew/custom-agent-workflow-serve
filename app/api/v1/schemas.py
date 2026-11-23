@@ -106,6 +106,39 @@ class MessageList(BaseModel):
     next_before: datetime | None = None
 
 
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    app_id: str
+    user_id: str
+    request_id: str | None = None
+    method: str
+    path: str
+    status_code: int
+    duration_ms: int
+    client_ip: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+
+
+class AuditLogList(BaseModel):
+    items: list[AuditLogOut]
+    next_before: datetime | None = None
+
+
+class AuditSummary(BaseModel):
+    window_hours: int
+    requests: int
+    errors: int
+    server_errors: int
+    client_errors: int
+    error_rate: float
+    users: int
+    avg_ms: int
+    p95_ms: int
+
+
 class WorkflowOut(BaseModel):
     workflow_id: str
     name: str

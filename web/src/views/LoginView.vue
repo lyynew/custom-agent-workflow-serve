@@ -40,7 +40,7 @@ async function submit() {
       user: result.user,
       expiresAt: result.expiresAt,
     })
-    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/chat')
+    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/playground')
   } catch (err) {
     error.value = err.message
   } finally {

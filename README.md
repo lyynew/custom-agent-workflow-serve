@@ -55,7 +55,7 @@ app/
 migrations/                 Alembic（biz.biz_alembic_version）
 scripts/                    容器入口、健康检查、备份
 auth_service/               发证服务：注册/登录/me，SQLite 存用户（见「认证契约」）
-web/                        Vue 3 前端：注册、登录、SSE 对话、图片上传
+web/                        Vue 3 控制台：测试台 / Token 接入 / 审计日志
 tests/                      认证、隔离、迁移、API、Adapter、Workflow 测试
 Dockerfile / docker-compose.yml
 spike/aegra/                P0 验证工程（不是生产代码）
@@ -204,7 +204,13 @@ uv run uvicorn auth_service.main:create_app --factory --host 127.0.0.1 --port 80
 
 ### 前端（`web/`）
 
-Vue 3 + Vite 的完整前端：注册、登录、Agent 列表、会话列表、SSE 流式对话、工具调用过程、图片上传。
+Vue 3 + Vite 的运维控制台，三个页面：
+
+| 页面 | 干什么 |
+|---|---|
+| **测试台** `/playground` | Agent 列表 + 会话列表 + 流式对话 + 图片上传；右侧调试面板显示首字延迟、总耗时、工具调用次数和原始 SSE 事件流 |
+| **Token 接入** `/access` | 粘贴别处签发的 `app_id` + JWT，验证能否调通：服务端验签结果、客户端解析的 claims 与有效期、可用 Agent/Workflow，还能直接试跑一次 `echo_agent` |
+| **审计日志** `/audit` | 请求数 / 错误率 / P95 / 活跃用户四张卡，按状态、方法、路径筛选，点行看详情（`request_id`、IP、UA） |
 
 ```bash
 cd web
@@ -214,7 +220,7 @@ npm run dev          # http://localhost:5173
 
 - 开发期用 Vite 代理：`/auth → 127.0.0.1:8001`、`/api → 127.0.0.1:2026`，所以两个后端都不用配 CORS。
 - 登录后 `token` 存 localStorage，每次请求自动带 `Authorization` 与 `X-App-Id`（值来自 `/auth/config`，不写死）。
-- 受保护路由有守卫：未登录访问 `/chat` 会跳回登录页；任何 401 都会清空本地登录态。
+- 受保护路由有守卫：未登录访问任一页都会跳回登录页；任何 401 都会清空本地登录态；旧的 `/chat` 链接会带上 query 重定向到 `/playground`。
 - Agent 与会话 id 写在 URL query 里（`/chat?agent=bingfeng_agent&conversation=…`），刷新和分享链接都能回到原处。
 - SSE 用 `fetch` + `ReadableStream` 手解（EventSource 只能发 GET），`meta → token → tool_call/tool_result → done` 逐条渲染。
 
@@ -236,6 +242,19 @@ npm run dev          # http://localhost:5173
 uv run python -m app.cli seed-apps --file seed/applications.example.json   # 含配额示例
 ```
 
+## 审计日志
+
+每个通过认证的业务请求都会落一行 `biz.audit_logs`：应用、用户、方法、路径、状态码、
+耗时、来源 IP、User-Agent、`request_id`。
+
+- **只记元信息**：请求体、`Authorization`、token 都不入库，图片和 prompt 更不会。
+- **耗时是整条请求**：流式对话等于"直到响应写完"，所以 `P95` 里包含对话时长，看接口健康度时按 `path` 过滤更准。
+- **未认证请求不记**：否则 401 可以被刷爆表；那一层交给入口网关的访问日志。
+- **租户级可见**：同应用的人能看到彼此调用了什么，跨应用由 `app_id` 隔离。
+- 写在后台任务里（旁路），审计慢或库抖不会拖住业务请求；代价是进程被强杀可能丢最后几条。
+
+保留策略：`uv run python -m app.cli prune-audit --days 30 [--app-id xxx]`。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
@@ -254,6 +273,8 @@ uv run python -m app.cli seed-apps --file seed/applications.example.json   # 含
 | GET | `/api/v1/workflows/runs/{run_id}` | 执行状态 |
 | GET | `/api/v1/workflows/runs/{run_id}/result` | 执行结果 |
 | POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消执行（对已结束的 run 返回 409） |
+| GET | `/api/v1/audit/logs` | 请求审计流水（`status` / `method` / `path` / `since` / `before` / `limit`） |
+| GET | `/api/v1/audit/summary` | 窗口内请求数、错误率、平均/P95 延时、活跃用户 |
 
 对话请求体：
 

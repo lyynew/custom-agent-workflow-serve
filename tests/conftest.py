@@ -75,6 +75,7 @@ async def _truncate_business_tables() -> None:
             text(
                 """
                 TRUNCATE TABLE
+                    biz.audit_logs,
                     biz.conversation_messages,
                     biz.conversations,
                     biz.workflow_runs,

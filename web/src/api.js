@@ -89,6 +89,66 @@ export const listMessages = (conversationId) =>
 export const deleteConversation = (conversationId) =>
   request(`/api/v1/conversations/${conversationId}`, { method: 'DELETE' })
 
+/* ------------------------------ 审计日志 ------------------------------- */
+
+export const listAuditLogs = ({ status, method, path, limit = 50, before } = {}) => {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (method) params.set('method', method)
+  if (path) params.set('path', path)
+  if (limit) params.set('limit', String(limit))
+  if (before) params.set('before', before)
+  return request(`/api/v1/audit/logs?${params.toString()}`)
+}
+
+export const auditSummary = (hours = 24) => request(`/api/v1/audit/summary?hours=${hours}`)
+
+/* --------------------------- 用任意 token 试接 ---------------------------- */
+
+function headersFor(token, appId) {
+  return { Authorization: `Bearer ${token}`, 'X-App-Id': appId, 'Content-Type': 'application/json' }
+}
+
+/** 用「别人的」token 调本服务：不占用当前登录态，纯粹验证接入是否可用。 */
+export async function probeToken({ token, appId }) {
+  const call = async (path, options = {}) => {
+    const response = await fetch(path, { ...options, headers: headersFor(token, appId) })
+    if (!response.ok) throw await toError(response)
+    return response.json()
+  }
+
+  const [whoami, app, agents] = await Promise.all([
+    call('/api/v1/whoami'),
+    call('/api/v1/apps/me'),
+    call('/api/v1/agents'),
+  ])
+  return { whoami, app, agents }
+}
+
+/** 用该 token 真跑一次 echo_agent，验证"能调通"而不只是"能验签"。 */
+export async function smokeRun({ token, appId, agentId = 'echo_agent', message = 'ping' }) {
+  const response = await fetch(`/api/v1/agents/${agentId}/chat`, {
+    method: 'POST',
+    headers: headersFor(token, appId),
+    body: JSON.stringify({ message }),
+  })
+  if (!response.ok) throw await toError(response)
+  return response.json()
+}
+
+export function decodeJwt(token) {
+  const parts = String(token).split('.')
+  if (parts.length !== 3) throw new Error('不是三段式的 JWT')
+  const decode = (segment) => {
+    const normalized = segment.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=')
+    const binary = atob(padded)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return JSON.parse(new TextDecoder().decode(bytes))
+  }
+  return { header: decode(parts[0]), payload: decode(parts[1]) }
+}
+
 /* ------------------------------ SSE 流式对话 ----------------------------- */
 
 function parseSseBlock(block) {

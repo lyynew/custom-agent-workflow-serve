@@ -4,12 +4,16 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from sqlalchemy import delete
 
 from app.auth.jwt import JwtConfig, resolve_key
 from app.auth.secrets import resolve_secret
 from app.auth.store import ApplicationConfig
 from app.database.session import dispose_engine, get_session_factory
+from app.models.audit_log import AuditLog
 from app.repositories.applications import ApplicationRepository
 from app.repositories.model_configs import ModelConfigRepository
 
@@ -118,6 +122,20 @@ async def _list_models() -> None:
     )
 
 
+async def _prune_audit(days: int, app_id: str | None) -> None:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    statement = delete(AuditLog).where(AuditLog.created_at < cutoff)
+    if app_id:
+        statement = statement.where(AuditLog.app_id == app_id)
+
+    async with get_session_factory()() as session:
+        result = await session.execute(statement)
+        await session.commit()
+
+    scope = f"app {app_id}" if app_id else "all applications"
+    print(f"pruned {result.rowcount or 0} audit rows older than {days} days for {scope}")
+
+
 async def _validate() -> None:
     async with get_session_factory()() as session:
         rows = await ApplicationRepository(session).list_all()
@@ -159,6 +177,8 @@ async def _run(args: argparse.Namespace) -> None:
             await _seed_models(Path(args.file))
         elif args.command == "list-models":
             await _list_models()
+        elif args.command == "prune-audit":
+            await _prune_audit(args.days, args.app_id)
         elif args.command == "validate":
             await _validate()
     finally:
@@ -178,6 +198,10 @@ def main() -> None:
     seed_models.add_argument("--file", default="seed/models.json")
 
     subparsers.add_parser("list-models", help="List model configs (key references only)")
+
+    prune = subparsers.add_parser("prune-audit", help="Delete audit rows older than N days")
+    prune.add_argument("--days", type=int, default=30)
+    prune.add_argument("--app-id", default=None, help="只清理某个应用；默认全部")
 
     subparsers.add_parser("validate", help="Validate every secret_ref, key reference and model config")
 

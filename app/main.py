@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.agents import agent_registry
+from app.api.audit import AuditMiddleware
 from app.api.errors import (
     APIError,
     api_error_handler,
@@ -56,6 +57,8 @@ app = FastAPI(
     description="Multi-tenant Agent / Workflow service engine",
     lifespan=lifespan,
 )
+
+app.add_middleware(AuditMiddleware)
 
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(AuthError, auth_error_handler)
