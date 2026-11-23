@@ -29,5 +29,13 @@ spike/**/tokens.json
 spike/**/stream.raw
 spike/**/*.log
 
+# 认证服务的本地用户库（SQLite），各环境自己生成
+auth_service/auth.db
+auth_service/auth.db-*
+
+# 前端
+web/node_modules/
+web/dist/
+
 # Database backups
 backups/

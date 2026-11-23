@@ -54,6 +54,8 @@ app/
 └── runtime/                RuntimeAdapter（业务层不依赖 Aegra 类型）
 migrations/                 Alembic（biz.biz_alembic_version）
 scripts/                    容器入口、健康检查、备份
+auth_service/               发证服务：注册/登录/me，SQLite 存用户（见「认证契约」）
+web/                        Vue 3 前端：注册、登录、SSE 对话、图片上传
 tests/                      认证、隔离、迁移、API、Adapter、Workflow 测试
 Dockerfile / docker-compose.yml
 spike/aegra/                P0 验证工程（不是生产代码）
@@ -176,6 +178,45 @@ X-App-Id: <app_id>
 - 越权统一返回 404，不区分「不存在」与「不属于你」。
 - `allowed_agents` / `allowed_workflows`：`["*"]` 全允许，`[]` 全禁止。
 - 业务错误统一为 `{"error": {"code", "message", "request_id"}}`；唯一例外是 401，它由 Aegra 的认证依赖在进入业务路由前产生，使用 Aegra 自己的信封。集成方请以 HTTP 状态码判断。
+
+### 自带一套可用的发证服务（`auth_service/`）
+
+本项目只负责**验签**，默认假设 token 由接入方自己的 IdP 签发。为了让整条链路能独立跑起来，仓库里带了一个极简发证服务：注册、登录、当前用户，SQLite 存用户，PBKDF2 存密码。
+
+```bash
+# 与主项目共用同一个密钥变量，签验两端不会漂
+uv run uvicorn auth_service.main:create_app --factory --host 127.0.0.1 --port 8001
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/auth/register` | `{username, password}`，用户名 3-32 位、密码 ≥8 位 |
+| POST | `/auth/login` | 返回 `access_token`（HS256，claim 带 `user_id` 与 `exp`） |
+| GET | `/auth/me` | 校验 Bearer token，返回身份 |
+| GET | `/auth/config` | 公开信息：`app_id`、token 有效期、要带的租户头 |
+
+要点：
+
+- 签名密钥读主项目的 `AGRI_JWT_SECRET`（即 `applications.jwt_config.secret_ref` 指向的变量），**不需要第二份配置**。
+- token claim：`sub`/`user_id`/`username`/`app_id`/`iat`/`exp`/`jti`。主项目默认按 `user_id` 读身份，所以两边天然对齐。
+- 用户不存在与密码错误返回同一个错误；同 IP+用户名连续失败 5 次后 429（进程内计数，多副本要换 Redis）。
+- 这是**给开发/演示用的**发证服务：没有邮箱验证、找回密码、refresh token、角色管理。生产接入请换成自己的 IdP，只要满足上面的 claim 约定即可。
+
+### 前端（`web/`）
+
+Vue 3 + Vite 的完整前端：注册、登录、Agent 列表、会话列表、SSE 流式对话、工具调用过程、图片上传。
+
+```bash
+cd web
+npm install
+npm run dev          # http://localhost:5173
+```
+
+- 开发期用 Vite 代理：`/auth → 127.0.0.1:8001`、`/api → 127.0.0.1:2026`，所以两个后端都不用配 CORS。
+- 登录后 `token` 存 localStorage，每次请求自动带 `Authorization` 与 `X-App-Id`（值来自 `/auth/config`，不写死）。
+- 受保护路由有守卫：未登录访问 `/chat` 会跳回登录页；任何 401 都会清空本地登录态。
+- Agent 与会话 id 写在 URL query 里（`/chat?agent=bingfeng_agent&conversation=…`），刷新和分享链接都能回到原处。
+- SSE 用 `fetch` + `ReadableStream` 手解（EventSource 只能发 GET），`meta → token → tool_call/tool_result → done` 逐条渲染。
 
 ## 配额与限流
 
