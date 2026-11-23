@@ -329,6 +329,7 @@ graph = builder.compile(name="my_agent")
 - 工具里**不要**做鉴权：鉴权在进入路由前已经完成，工具拿不到也不需要 `app_id` / `user_id`。如果工具需要按租户取数，通过 state 或闭包传入。
 - 单个工具抛异常不会打断整轮（框架会转成一条错误结果给模型），但会浪费一次模型调用，能提前校验就提前校验。
 - **优先用官方集成，别自己包 HTTP**：需要联网搜索就用 `langchain-tavily` 的 `TavilySearch`，需要数据库就用 `langchain-community` 里对应的工具。参数校验、超时、空结果提示、异常兜底都已经写好，你只需覆盖名字、描述和密钥来源——参考 `app/agents/web_search.py`（约 50 行，其中一半是注释）。
+- **工具里可以再调一次模型**：当一步需要稳定的结构化产出（例如「症状 → 病害方向 → 农药关键词」），把它做成独立工具比塞进主提示词更好——格式可控、失败可降级、还能单独指定更便宜的模型（`MODEL_CONFIG_PESTICIDE_RECOMMENDATION`）。参考 `app/agents/pesticide.py` 的 `PesticideRecommendation`：输入作物/生长期/症状，返回可检索的关键词，用量与安全间隔期一律不答，交给登记信息核实。
 
 ### 3.6 硬约束用中间件，不要拿提示词当开关
 

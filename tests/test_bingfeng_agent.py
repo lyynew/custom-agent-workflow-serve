@@ -12,6 +12,8 @@ from langchain_tavily import TavilySearch
 
 from app.agents.implementations import bingfeng_agent
 from app.agents.implementations.bingfeng_agent import SYSTEM_PROMPT, build, build_agent
+from app.agents.pesticide import TOOL_NAME as PESTICIDE_TOOL_NAME
+from app.agents.pesticide import recommend_pesticides
 from app.agents.web_search import SEARCH_TOOL_NAME, build_web_search_tool
 from app.repositories.model_configs import ModelConfigRepository
 from app.services.models import model_resolver
@@ -152,11 +154,27 @@ async def test_batch_of_parallel_searches_is_trimmed_to_the_limit(counted_search
     assert counter["calls"] == 2
 
 
-def test_no_tools_means_no_tool_node(counted_search_tool):
+def test_no_tools_means_no_tool_node():
+    assert "tools" not in build_agent(_SearchAddictedModel(), None, 3).get_graph().nodes
+
+
+def test_a_zero_search_budget_adds_no_search_limiter(counted_search_tool):
     search_tool, _ = counted_search_tool
 
-    assert "tools" not in build_agent(_SearchAddictedModel(), None, 3).get_graph().nodes
-    assert "tools" not in build_agent(_SearchAddictedModel(), [search_tool], 0).get_graph().nodes
+    nodes = build_agent(_SearchAddictedModel(), [search_tool], 0).get_graph().nodes
+
+    assert not any(SEARCH_TOOL_NAME in node for node in nodes)
+
+
+def test_pesticide_and_search_limits_live_in_the_graph(counted_search_tool):
+    search_tool, _ = counted_search_tool
+
+    nodes = build_agent(
+        _SearchAddictedModel(), [recommend_pesticides, search_tool], 3
+    ).get_graph().nodes
+
+    assert any(PESTICIDE_TOOL_NAME in node for node in nodes)
+    assert any(SEARCH_TOOL_NAME in node for node in nodes)
 
 
 async def test_system_prompt_carries_todays_date():
