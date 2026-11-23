@@ -362,6 +362,41 @@ agent = create_agent(
 - `run_limit` 是**每次调用**计数（`thread_limit` 才是整条会话累计），所以刷新预算不需要清任何状态。
 - 模型一次并行发 4 个搜索时，中间件按数量裁到 3 个，超出的调用不会真的打到 API。
 
+### 3.7 图片输入怎么走
+
+农户拍张病叶照片是最自然的入口，所以 `/chat` 和 `/chat/stream` 都吃 `images`：
+
+```json
+{"message": "这叶子怎么了", "images": [{"url": "https://example.com/leaf.jpg"}]}
+```
+
+链路是这样的，中间没有任何自定义消息格式：
+
+```text
+ChatRequest.images ──归一──> [{"type":"image_url","image_url":{"url": ...}}]
+                        │
+                        ├─ url 原样透传（模型服务自己取图）
+                        └─ base64 解码 → 按魔数核对格式 → 重新编码成 data: URL
+                        ↓
+   input={"messages":[{"role":"user","content":[text块, image块...]}]}
+                        ↓
+   Aegra → LangGraph convert_to_messages → HumanMessage(content=[...])
+                        ↓
+   ChatOpenAI 请求体里的 content 数组（OpenAI 兼容，data URL 也认）
+```
+
+几个取值上的判断：
+
+| 事情 | 做法 | 原因 |
+|---|---|---|
+| 校验时机 | 进运行时之前，schema 层做 | 400/422 比跑到一半失败便宜，也不浪费配额 |
+| 格式判定 | 看文件头魔数，不信任 `mime_type` | 调用方经常把 png 声明成 jpeg |
+| 体积上限 | 单张 5MB、每条最多 4 张 | base64 膨胀 1/3，再多就是在给模型塞垃圾 |
+| 是否入库 | 不入库，只留「（附图 N 张）」 | 几 MB 的 base64 进 PG 会把消息表和备份一起拖垮 |
+| 模型要求 | 换成视觉模型，按 Agent 覆盖 | 纯文本模型收到 image 块会直接报错 |
+
+工具不需要改：图片在 `HumanMessage` 里，`web_search` 和 `PesticideRecommendation` 照常拿文字参数干活。反过来，提示词里"不要对图片做联网识图"这类约束仍然有效，因为工具只看得到文字。
+
 ---
 
 ## 4. FAQ

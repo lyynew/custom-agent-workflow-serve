@@ -220,6 +220,25 @@ uv run python -m app.cli seed-apps --file seed/applications.example.json   # 含
 {"message": "你好", "conversation_id": "可选；不传则自动创建会话"}
 ```
 
+### 图片输入（多模态）
+
+`message` 与 `images` 至少给一个，`images` 最多 4 张，单张 ≤ 5MB：
+
+```json
+{
+  "message": "这叶子怎么了",
+  "images": [
+    {"url": "https://example.com/leaf.jpg"},
+    {"base64": "iVBORw0KGgo...", "mime_type": "image/png"}
+  ]
+}
+```
+
+- `url` 必须是 `http://` / `https://`，由模型服务自己去取；`base64` 可带 `data:image/png;base64,` 前缀，不写 `mime_type` 时按文件头识别（jpeg/png/webp/gif）。
+- 校验在进入运行时之前完成：格式、体积、二选一、数量不合规一律 `422`，不会创建 run。
+- 图片**不入库**：`conversation_messages.content` 只留文字加一行「（附图 N 张）」，避免几 MB 的 base64 撑爆消息表。要长期留存图片需接对象存储。
+- 模型必须支持视觉（`biz.model_configs` 指向 vision 模型，如 Qwen-VL / GPT-4o 类）；纯文本模型会直接报错。可按 Agent 覆盖：`MODEL_CONFIG_<AGENT_ID>`。
+
 ### SSE 事件契约
 
 ```text

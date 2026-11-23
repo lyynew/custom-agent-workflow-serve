@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+
+from app.services.multimodal import (
+    MAX_IMAGES_PER_MESSAGE,
+    ImageInputError,
+    normalise_image,
+)
 
 
 class AgentOut(BaseModel):
@@ -38,9 +44,49 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class ImageInput(BaseModel):
+    """一张待分析的图片：`url` 与 `base64` 二选一。
+
+    - `url`：公网可访问的 http/https 地址，模型服务自己去取；
+    - `base64`：图片字节的 base64，可带 `data:image/png;base64,` 前缀；不写
+      `mime_type` 时按文件头自动识别（jpeg/png/webp/gif，单张上限 5MB）。
+    """
+
+    url: str | None = None
+    base64: str | None = None
+    mime_type: str | None = None
+
+    #: 归一化后的地址（私有属性，不进 schema、不进响应），供运行时使用。
+    _data_url: str = PrivateAttr(default="")
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "ImageInput":
+        try:
+            self._data_url = normalise_image(url=self.url, base64_data=self.base64, mime_type=self.mime_type)
+        except ImageInputError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+    @property
+    def data_url(self) -> str:
+        return self._data_url
+
+
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=32_000)
+    """一次用户输入。`message` 与 `images` 至少要有一个。"""
+
+    message: str = Field(default="", max_length=32_000)
+    images: list[ImageInput] = Field(default_factory=list, max_length=MAX_IMAGES_PER_MESSAGE)
     conversation_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _needs_text_or_image(self) -> "ChatRequest":
+        if not self.message.strip() and not self.images:
+            raise ValueError("message 与 images 至少要提供一个")
+        return self
+
+    def image_urls(self) -> list[str]:
+        return [image.data_url for image in self.images]
 
 
 class ChatResponse(BaseModel):

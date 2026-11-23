@@ -40,6 +40,7 @@ from app.services.conversations import (
     persist_assistant_message,
     title_from_message,
 )
+from app.services.multimodal import build_runtime_content, stored_user_text, title_text
 from app.services.workflows import TaskLauncher
 
 logger = logging.getLogger(__name__)
@@ -79,16 +80,20 @@ async def chat(
     conversation = await service.resolve(
         agent_id,
         payload.conversation_id,
-        title=title_from_message(payload.message),
+        title=title_from_message(title_text(payload.message, len(payload.images))),
     )
-    user_message = await service.add_user_message(conversation, payload.message)
+    user_message = await service.add_user_message(
+        conversation,
+        stored_user_text(payload.message, len(payload.images)),
+    )
+    runtime_content = build_runtime_content(payload.message, payload.image_urls())
 
     try:
         result = await runtime.run_wait_on_thread(
             credentials,
             thread_id=conversation.thread_id,
             graph_id=agent_id,
-            input={"messages": [{"role": "user", "content": payload.message}]},
+            input={"messages": [{"role": "user", "content": runtime_content}]},
         )
     except RuntimeCallError as exc:
         logger.warning("Agent runtime call failed: %s", exc)
@@ -132,9 +137,13 @@ async def chat_stream(
     conversation = await service.resolve(
         agent_id,
         payload.conversation_id,
-        title=title_from_message(payload.message),
+        title=title_from_message(title_text(payload.message, len(payload.images))),
     )
-    user_message = await service.add_user_message(conversation, payload.message)
+    user_message = await service.add_user_message(
+        conversation,
+        stored_user_text(payload.message, len(payload.images)),
+    )
+    runtime_content = build_runtime_content(payload.message, payload.image_urls())
 
     async def events():
         yield sse(
@@ -156,7 +165,7 @@ async def chat_stream(
                 credentials,
                 thread_id=conversation.thread_id,
                 graph_id=agent_id,
-                input={"messages": [{"role": "user", "content": payload.message}]},
+                input={"messages": [{"role": "user", "content": runtime_content}]},
             ):
                 if isinstance(event, RunStarted):
                     run_id = event.run_id
