@@ -1,86 +1,50 @@
-"""Tavily-backed web search exposed to agents as a tool.
+"""Tavily 联网搜索：直接用 LangChain 官方 `langchain-tavily` 集成。
 
-The tool returns readable text (title / url / snippet) rather than raw JSON: the
-model consumes it directly, and an unparseable blob wastes context on braces.
-Failures are returned as text too, so a search outage degrades the answer instead
-of aborting the run.
+HTTP 请求、参数校验、空结果提示、异常兜底全部由 `TavilySearch` 负责，这里只保留
+项目自己决定的三件事：
+
+1. 工具名固定为 `web_search`——提示词、检索预算中间件、测试都按这个名字定位工具；
+2. 描述换成中文，告诉模型哪些问题值得联网、查询该怎么组织；
+3. 密钥按项目约定从 `env:TAVILY_API_KEY` 解析。缺密钥时返回 `None`，让 Agent 干脆
+   不挂载这个工具，而不是启动即崩、或让模型假装查过。
 """
 
 import logging
-from typing import Any
+from typing import Literal
 
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool
+from langchain_tavily import TavilySearch
 
 from app.auth.errors import SecretResolutionError
 from app.auth.secrets import resolve_secret
 
 logger = logging.getLogger(__name__)
 
+SEARCH_TOOL_NAME = "web_search"
 TAVILY_SECRET_REF = "env:TAVILY_API_KEY"
 MAX_RESULTS = 5
-CONTENT_CHARS = 320
-SEARCH_TIMEOUT_SECONDS = 20
+SEARCH_DEPTH: Literal["basic"] = "basic"
 
-_client: Any | None = None
-
-
-def _get_client() -> Any:
-    """Lazy singleton: importing the module must not require a key."""
-    global _client
-    if _client is None:
-        from tavily import TavilyClient
-
-        _client = TavilyClient(api_key=resolve_secret(TAVILY_SECRET_REF))
-    return _client
+SEARCH_TOOL_DESCRIPTION = (
+    "联网检索农业相关信息。适合查询政策补贴、天气预警、病虫害情报、农药登记等"
+    "会随时间变化的内容。查询写具体：作物 + 地区 + 时间 + 具体问题，"
+    "例如「河南 2026 年小麦赤霉病 预警」。"
+)
 
 
-def reset_client() -> None:
-    """Drop the cached client (tests and key rotation)."""
-    global _client
-    _client = None
-
-
-@tool
-def web_search(query: str) -> str:
-    """联网搜索农业相关信息。适合查询政策补贴、天气预警、病虫害情报、农药登记等时效性内容。
-
-    查询请写具体：作物 + 地区 + 时间 + 具体问题，例如"河南 2026 年小麦赤霉病 预警"。
-    """
-    text = query.strip()
-    if not text:
-        return "搜索失败：查询内容为空。"
-
+def build_web_search_tool() -> BaseTool | None:
+    """按需构建 Tavily 搜索工具；没有密钥时返回 None（Agent 退化为离线回答）。"""
     try:
-        result = _get_client().search(
-            query=text,
-            search_depth="basic",
-            topic="general",
-            max_results=MAX_RESULTS,
-            include_answer=False,
-            timeout=SEARCH_TIMEOUT_SECONDS,
-        )
+        api_key = resolve_secret(TAVILY_SECRET_REF)
     except SecretResolutionError:
-        logger.warning("Web search requested without TAVILY_API_KEY")
-        return "搜索失败：未配置联网搜索密钥，请基于已有知识回答并说明未能联网核实。"
-    except Exception as exc:  # noqa: BLE001 - any provider error must not kill the run
-        logger.warning("Web search failed: %s", exc)
-        return f"搜索失败（{type(exc).__name__}）。请基于已有知识回答并说明未能联网核实。"
+        logger.warning("%s 未配置，智能体将以离线模式运行（不挂载联网搜索）", TAVILY_SECRET_REF)
+        return None
 
-    items = result.get("results") or []
-    if not items:
-        return "未检索到相关结果。"
-
-    lines = [f"“{text}”检索到 {len(items)} 条结果："]
-    for index, item in enumerate(items, 1):
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("title") or "").strip()
-        url = str(item.get("url") or "").strip()
-        content = " ".join(str(item.get("content") or "").split())[:CONTENT_CHARS]
-        published = str(item.get("published_date") or "").strip()
-        header = f"{index}. {title}"
-        if published:
-            header += f"（{published}）"
-        lines.append(f"{header}\n   {url}\n   {content}")
-
-    return "\n".join(lines)
+    return TavilySearch(
+        name=SEARCH_TOOL_NAME,
+        description=SEARCH_TOOL_DESCRIPTION,
+        tavily_api_key=api_key,
+        max_results=MAX_RESULTS,
+        search_depth=SEARCH_DEPTH,
+        include_answer=False,
+    )

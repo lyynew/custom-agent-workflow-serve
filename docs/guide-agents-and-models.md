@@ -328,6 +328,38 @@ graph = builder.compile(name="my_agent")
 - 工具就是普通函数加 `@tool` 装饰器（`langchain_core.tools`），第一个字符串是给模型看的说明。
 - 工具里**不要**做鉴权：鉴权在进入路由前已经完成，工具拿不到也不需要 `app_id` / `user_id`。如果工具需要按租户取数，通过 state 或闭包传入。
 - 单个工具抛异常不会打断整轮（框架会转成一条错误结果给模型），但会浪费一次模型调用，能提前校验就提前校验。
+- **优先用官方集成，别自己包 HTTP**：需要联网搜索就用 `langchain-tavily` 的 `TavilySearch`，需要数据库就用 `langchain-community` 里对应的工具。参数校验、超时、空结果提示、异常兜底都已经写好，你只需覆盖名字、描述和密钥来源——参考 `app/agents/web_search.py`（约 50 行，其中一半是注释）。
+
+### 3.6 硬约束用中间件，不要拿提示词当开关
+
+「每次最多搜 3 次」「最多循环 5 轮」这类要求，写进提示词只能算建议，模型该超还是超。`create_agent` 的中间件是这类约束的落点，`bingfeng_agent.py` 就是完整例子：
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import ToolCallLimitMiddleware, dynamic_prompt
+
+@dynamic_prompt
+def prompt_with_today(request) -> str:          # 每次调模型时重新计算
+    return f"{SYSTEM_PROMPT}\n\n今天是 {_today()}。"
+
+agent = create_agent(
+    model=model,
+    tools=[search_tool],
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[
+        prompt_with_today,
+        # 每次 run 只放行 3 次 web_search；第 4 次起用一条
+        # "已达上限"的 ToolMessage 回给模型，让它收口作答
+        ToolCallLimitMiddleware(tool_name="web_search", run_limit=3, exit_behavior="continue"),
+    ],
+    name="bingfeng_agent",
+)
+```
+
+两个细节值得记：
+
+- `run_limit` 是**每次调用**计数（`thread_limit` 才是整条会话累计），所以刷新预算不需要清任何状态。
+- 模型一次并行发 4 个搜索时，中间件按数量裁到 3 个，超出的调用不会真的打到 API。
 
 ---
 
